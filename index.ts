@@ -56,9 +56,14 @@ serve({
 
     // === Register Bot Token via /XYZ{token} ===
     if (path.startsWith("/XYZ")) {
-      const token = decodeURIComponent(path.slice(4));
-      if (!token || token.length < 30 || !token.includes(":")) {
-        return new Response("Invalid bot token", { status: 400 });
+      let raw = path.slice(4);
+      const token = decodeURIComponent(raw.trim());
+
+      console.log("Received token:", token);
+
+      const tokenRegex = /^[0-9]{7,10}:[a-zA-Z0-9_-]{30,}$/;
+      if (!tokenRegex.test(token)) {
+        return new Response("❌ Invalid bot token format", { status: 400 });
       }
 
       tokens.add(token);
