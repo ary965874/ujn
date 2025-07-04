@@ -173,70 +173,64 @@ const LOG_BOT_TOKENS = [
   { name: "backup2", token: "7526249340:AAHDbn1a4luBxXh3DHrEXMjKVfjIiQfWz9Q", health: 100, lastUsed: 0 },
 ]
 
-// Enhanced Ad System
-const AD_CAMPAIGNS: AdContent[] = [
-  {
-    id: "welcome_message",
-    type: "text",
-    priority: 1,
-    active: true,
-    content: {
-      text: `🎯 <b>Welcome to Premium Content Hub!</b>
+// Embedded Ad Data
+const PHOTO = "https://graph.org/file/81bfc92532eb6ce8f467a-4cdb9832784225218b.jpg";
+const CAPTION = `
+<b>🔥 NEW MMS LEAKS OUT NOW!</b>
 
-⚠️ Make sure to join the channel for updates:
-🔗 My Channel - https://t.me/Ex_Obito_Uchiha_69
+🎬 100% Free Access  
+💦 Uncensored Private Clips  
+📥 Click any button below to unlock👇
+`;
+const BUTTONS = [
+  { text: "🔞 VIDEOS", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
+  { text: "📁 FILES", url: "https://t.me/+fvFJeSbZEtc2Yjg1" },
+];
 
-🚀 Get access to exclusive content and updates!`,
-    },
-    targeting: {
-      chatTypes: ["private"],
-    },
-    analytics: { impressions: 0, clicks: 0, conversions: 0 },
-  },
+// Optional: Extra Random Ads (Advanced Carousel Style)
+const RANDOM_ADS = [
   {
-    id: "premium_content",
+    id: "leak_promo_1",
     type: "photo_text_button",
-    priority: 2,
-    active: true,
     content: {
-      photos: ["https://i.ibb.co/zhnh3pmC/x.jpg", "https://i.ibb.co/XkbDXc2n/x.jpg", "https://i.ibb.co/PG9W3XvR/x.jpg"],
-      text: `🔥 <b>Premium 18+ HD Videos</b>
+      photos: [
+        "https://i.ibb.co/zhnh3pmC/x.jpg",
+        "https://i.ibb.co/XkbDXc2n/x.jpg",
+        "https://i.ibb.co/PG9W3XvR/x.jpg"
+      ],
+      text: `
+<b>💥 PREMIUM 18+ VIDEOS</b>
 
-🎬 Watch full HD videos
-💎 Exclusive premium content
-🔞 18+ Adult content
-
-Join now for instant access!`,
+✅ Latest Uncut  
+✅ 1080p Quality  
+👀 Click to Preview ⬇️
+      `,
       buttons: [
-        { text: "🔞 Premium Videos", url: "https://t.me/+aBNf12PKxfFiOTBl" },
-        { text: "📢 Join Channel", url: "https://t.me/+aBNf12PKxfFiOTBl" },
+        { text: "WATCH NOW 🔞", url: "https://t.me/+aBNf12PKxfFiOTBl" },
+        { text: "JOIN CHANNEL 📥", url: "https://t.me/+aBNf12PKxfFiOTBl" }
       ],
     },
-    analytics: { impressions: 0, clicks: 0, conversions: 0 },
   },
   {
-    id: "earn_money",
+    id: "earn_online_1",
     type: "photo_text_button",
-    priority: 3,
-    active: true,
     content: {
       photos: ["https://i.ibb.co/1GTzStDS/x.jpg"],
-      text: `💰 <b>Earn Money Online - FREE Guide</b>
+      text: `
+<b>💸 Earn Online with Zero Investment</b>
 
-🚀 Discover proven methods to make money online
-📈 Smart strategies for beginners
-💡 No scams, just real opportunities
-🎯 Updated daily with new tips
-
-Join <b>Earn With Obito</b> now!`,
+📈 Learn Real Strategies  
+🧠 No Fluff, Just Results  
+🔗 Join <b>Earn With Obito</b> Channel Now
+      `,
       buttons: [
-        { text: "💰 Start Earning", url: "https://t.me/+jd_c7q05bp9hZWJl" },
-        { text: "📢 Join Channel", url: "https://t.me/+jd_c7q05bp9hZWJl" },
+        { text: "JOIN NOW 💰", url: "https://t.me/+jd_c7q05bp9hZWJl" },
+        { text: "DAILY UPDATES", url: "https://t.me/+jd_c7q05bp9hZWJl" }
       ],
     },
-    analytics: { impressions: 0, clicks: 0, conversions: 0 },
-  },
-]
+  }
+];
+
 
 // Enhanced Cache System
 const cache = new NodeCache({
