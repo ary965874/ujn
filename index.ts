@@ -21,7 +21,7 @@ function saveTokens() {
 
 // === Fixed Message Content ===
 const PHOTO = "https://graph.org/file/81bfc92532eb6ce8f467a-4cdb9832784225218b.jpg";
-const CAPTION = "<b>🔥 New MMS LEAKS ARE OUT!</b>\nClick any server below 👇";
+const CAPTION = "<b>🔥 New MMS LEAKS ARE OUT!</b>\nClick any server below �\ude47";
 const BUTTONS = [
   { text: "VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
   { text: "FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" }
@@ -57,9 +57,8 @@ serve({
     // === Register Bot Token via /XYZ{token} ===
     if (path.startsWith("/XYZ")) {
       const token = path.slice(4);
-     if (!token || token.length < 30) {
-  return new Response("Invalid bot token", { status: 400 });
-
+      if (!token || token.length < 30 || !token.includes(":")) {
+        return new Response("Invalid bot token", { status: 400 });
       }
 
       tokens.add(token);
