@@ -1,29 +1,27 @@
 import { serve } from "bun"
 import NodeCache from "node-cache"
 
-// Enhanced TypeScript Interfaces
-interface TelegramResponse {
+// Core Interfaces
+interface TelegramAPIResponse {
   ok: boolean
   description?: string
   result?: any
-  parameters?: {
-    retry_after?: number
-  }
+  parameters?: { retry_after?: number }
 }
 
-interface RequestLogEntry {
+interface LogEntry {
   id: string
   timestamp: string
-  token: string
+  botToken: string
   status: "success" | "failed" | "rate_limited"
   responseTime: number
-  errorReason?: string
-  botUsername?: string
+  errorMessage?: string
+  botName?: string
   userAgent?: string
-  ipAddress?: string
+  clientIP?: string
 }
 
-interface ServerStats {
+interface SystemMetrics {
   totalRequests: number
   successfulRequests: number
   failedRequests: number
@@ -40,7 +38,6 @@ interface TelegramUpdate {
   message?: {
     chat: TelegramChat
     from?: TelegramUser
-    contact?: TelegramContact
     text?: string
   }
   callback_query?: {
@@ -79,14 +76,7 @@ interface TelegramChat {
   username?: string
 }
 
-interface TelegramContact {
-  phone_number: string
-  first_name: string
-  last_name?: string
-  user_id?: number
-}
-
-interface BotInfoResponse {
+interface BotInfo {
   ok: boolean
   result?: {
     id: number
@@ -98,58 +88,39 @@ interface BotInfoResponse {
   }
 }
 
-interface AdSchedule {
-  startTime: string
-  endTime: string
-  timezone?: string
-  daysOfWeek?: number[] // 0-6, Sunday to Saturday
-  hoursOfDay?: number[] // 0-23
-}
-
-// Update the AdContent interface to include schedule
-interface AdContent {
+interface Campaign {
   id: string
-  type: "text" | "photo" | "video" | "document" | "photo_text_button"
-  priority: number
+  type: "photo_with_buttons"
   active: boolean
+  priority: number
   content: {
-    text?: string
-    photos?: string[]
-    video?: string
-    document?: string
-    buttons?: Array<{
+    photos: string[]
+    caption: string
+    buttons: Array<{
       text: string
-      url?: string
-      callback_data?: string
+      url: string
     }>
   }
-  targeting?: {
-    chatTypes?: string[]
-    languages?: string[]
-    excludeUsers?: number[]
-    includeUsers?: number[]
-    countries?: string[]
+  targeting: {
+    chatTypes: string[]
   }
-  analytics: {
+  metrics: {
     impressions: number
     clicks: number
-    conversions: number
     lastShown?: string
   }
-  schedule?: AdSchedule
-  weight?: number // For weighted random selection
 }
 
-interface InteractionLog {
+interface UserInteraction {
   id: string
   timestamp: string
-  botUsername: string
+  botName: string
   botToken: string
   user: {
     id: number
-    fullName: string
+    name: string
     username: string
-    languageCode?: string
+    language?: string
     isBot: boolean
   }
   chat: {
@@ -160,43 +131,43 @@ interface InteractionLog {
   updateType: string
   metadata: {
     userAgent?: string
-    ipAddress?: string
+    clientIP?: string
     responseTime: number
   }
 }
 
-// Configuration Constants
-const CONFIG = {
-  MAX_INTERACTIONS_BUFFER: 15,
+// System Configuration
+const SYSTEM_CONFIG = {
+  MAX_INTERACTION_BUFFER: 15,
   LOG_CHANNEL_ID: "-1002529607208",
   ADMIN_CHANNEL_ID: "-1002628971429",
   ADMIN_BOT_TOKEN: "7734817163:AAESWrSeVKg5iclnM2R2SvOA5xESClG8tFM",
   DASHBOARD_PASSWORD: "ashu45",
-  RATE_LIMIT_WINDOW: 60000, // 1 minute
+  RATE_LIMIT_WINDOW: 60000,
   RATE_LIMIT_MAX_REQUESTS: 30,
   REQUEST_TIMEOUT: 15000,
   RETRY_ATTEMPTS: 3,
-  CACHE_TTL: 86400, // 24 hours
+  CACHE_TTL: 86400,
 } as const
 
-// Single Log Bot Configuration
-const LOG_BOT_TOKEN = {
-  name: "main",
+// Bot Configuration
+const MAIN_BOT = {
+  name: "primary",
   token: "5487595571:AAF9U10ETqOjNpVrEhT6MQONIta6PJUXSB0",
   health: 100,
   lastUsed: 0,
 }
 
-// Single Ad Campaign - ONLY THIS ONE SHOULD EXIST
-const AD_CAMPAIGNS: AdContent[] = [
+// Single Campaign Configuration
+const ACTIVE_CAMPAIGNS: Campaign[] = [
   {
-    id: "mms_leaks_premium_only",
-    type: "photo_text_button",
-    priority: 1,
+    id: "premium_content_campaign",
+    type: "photo_with_buttons",
     active: true,
+    priority: 1,
     content: {
       photos: ["https://i.ibb.co/69jxy9f/image.png"],
-      text: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
+      caption: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
 
 💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥
 
@@ -216,57 +187,57 @@ const AD_CAMPAIGNS: AdContent[] = [
     targeting: {
       chatTypes: ["private", "group"],
     },
-    analytics: { impressions: 0, clicks: 0, conversions: 0 },
+    metrics: { impressions: 0, clicks: 0 },
   },
 ]
 
-// Enhanced Cache System
-const cache = new NodeCache({
-  stdTTL: CONFIG.CACHE_TTL,
+// Memory Cache
+const memoryCache = new NodeCache({
+  stdTTL: SYSTEM_CONFIG.CACHE_TTL,
   checkperiod: 600,
   useClones: false,
   maxKeys: 10000,
 })
 
-// Global State Management
-class ServerState {
-  private static instance: ServerState
+// System State Manager
+class SystemStateManager {
+  private static instance: SystemStateManager
   public startTime: number = Date.now()
-  public interactionBuffer: InteractionLog[] = []
+  public interactionBuffer: UserInteraction[] = []
   public activeConnections = 0
-  public rateLimitMap: Map<string, { count: number; resetTime: number }> = new Map()
+  public rateLimitTracker: Map<string, { count: number; resetTime: number }> = new Map()
 
-  static getInstance(): ServerState {
-    if (!ServerState.instance) {
-      ServerState.instance = new ServerState()
+  static getInstance(): SystemStateManager {
+    if (!SystemStateManager.instance) {
+      SystemStateManager.instance = new SystemStateManager()
     }
-    return ServerState.instance
+    return SystemStateManager.instance
   }
 
-  incrementConnections(): void {
+  addConnection(): void {
     this.activeConnections++
   }
 
-  decrementConnections(): void {
+  removeConnection(): void {
     this.activeConnections = Math.max(0, this.activeConnections - 1)
   }
 
-  addInteraction(interaction: InteractionLog): void {
+  logInteraction(interaction: UserInteraction): void {
     this.interactionBuffer.unshift(interaction)
-    if (this.interactionBuffer.length > CONFIG.MAX_INTERACTIONS_BUFFER * 2) {
-      this.interactionBuffer = this.interactionBuffer.slice(0, CONFIG.MAX_INTERACTIONS_BUFFER)
+    if (this.interactionBuffer.length > SYSTEM_CONFIG.MAX_INTERACTION_BUFFER * 2) {
+      this.interactionBuffer = this.interactionBuffer.slice(0, SYSTEM_CONFIG.MAX_INTERACTION_BUFFER)
     }
   }
 
-  getStats(): ServerStats {
+  getSystemMetrics(): SystemMetrics {
     const memoryUsage = process.memoryUsage()
     const uptime = Date.now() - this.startTime
 
-    const totalRequests = (cache.get("totalRequests") as number) || 0
-    const successfulRequests = (cache.get("successfulRequests") as number) || 0
-    const failedRequests = (cache.get("failedRequests") as number) || 0
-    const rateLimitedRequests = (cache.get("rateLimitedRequests") as number) || 0
-    const totalResponseTime = (cache.get("totalResponseTime") as number) || 0
+    const totalRequests = (memoryCache.get("totalRequests") as number) || 0
+    const successfulRequests = (memoryCache.get("successfulRequests") as number) || 0
+    const failedRequests = (memoryCache.get("failedRequests") as number) || 0
+    const rateLimitedRequests = (memoryCache.get("rateLimitedRequests") as number) || 0
+    const totalResponseTime = (memoryCache.get("totalResponseTime") as number) || 0
 
     return {
       totalRequests,
@@ -282,11 +253,11 @@ class ServerState {
   }
 }
 
-const serverState = ServerState.getInstance()
+const systemState = SystemStateManager.getInstance()
 
-// Utility Functions
-class Utils {
-  static sanitizeHtml(text: string): string {
+// Utility Helper Functions
+class HelperUtils {
+  static cleanText(text: string): string {
     if (!text) return ""
     return text
       .replace(/[\u0300-\u036f\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]/g, "")
@@ -305,11 +276,11 @@ class Utils {
       .trim()
   }
 
-  static generateId(): string {
+  static createUniqueId(): string {
     return Date.now().toString(36) + Math.random().toString(36).substr(2)
   }
 
-  static formatUptime(ms: number): string {
+  static formatDuration(ms: number): string {
     const seconds = Math.floor(ms / 1000)
     const minutes = Math.floor(seconds / 60)
     const hours = Math.floor(minutes / 60)
@@ -321,34 +292,33 @@ class Utils {
     return `${seconds}s`
   }
 
-  static formatBytes(bytes: number): string {
+  static formatFileSize(bytes: number): string {
     const sizes = ["Bytes", "KB", "MB", "GB"]
     if (bytes === 0) return "0 Bytes"
     const i = Math.floor(Math.log(bytes) / Math.log(1024))
     return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + " " + sizes[i]
   }
 
-  static getClientIP(req: Request): string {
+  static extractClientIP(req: Request): string {
     const forwarded = req.headers.get("x-forwarded-for")
     const realIP = req.headers.get("x-real-ip")
     const cfIP = req.headers.get("cf-connecting-ip")
-
     return cfIP || realIP || forwarded?.split(",")[0] || "unknown"
   }
 
-  static isRateLimited(identifier: string): boolean {
+  static checkRateLimit(identifier: string): boolean {
     const now = Date.now()
-    const rateLimitData = serverState.rateLimitMap.get(identifier)
+    const rateLimitData = systemState.rateLimitTracker.get(identifier)
 
     if (!rateLimitData || now > rateLimitData.resetTime) {
-      serverState.rateLimitMap.set(identifier, {
+      systemState.rateLimitTracker.set(identifier, {
         count: 1,
-        resetTime: now + CONFIG.RATE_LIMIT_WINDOW,
+        resetTime: now + SYSTEM_CONFIG.RATE_LIMIT_WINDOW,
       })
       return false
     }
 
-    if (rateLimitData.count >= CONFIG.RATE_LIMIT_MAX_REQUESTS) {
+    if (rateLimitData.count >= SYSTEM_CONFIG.RATE_LIMIT_MAX_REQUESTS) {
       return true
     }
 
@@ -357,62 +327,62 @@ class Utils {
   }
 }
 
-// Enhanced Logging System
-class Logger {
-  static storeRequestLog(entry: Partial<RequestLogEntry>): void {
-    const logEntry: RequestLogEntry = {
-      id: Utils.generateId(),
+// Request Logger
+class RequestLogger {
+  static saveLog(entry: Partial<LogEntry>): void {
+    const logEntry: LogEntry = {
+      id: HelperUtils.createUniqueId(),
       timestamp: new Date().toISOString(),
-      token: entry.token || "unknown",
+      botToken: entry.botToken || "unknown",
       status: entry.status || "failed",
       responseTime: entry.responseTime || 0,
-      errorReason: entry.errorReason,
-      botUsername: entry.botUsername,
+      errorMessage: entry.errorMessage,
+      botName: entry.botName,
       userAgent: entry.userAgent,
-      ipAddress: entry.ipAddress,
+      clientIP: entry.clientIP,
     }
 
-    const requestLog = (cache.get("requestLog") as RequestLogEntry[]) || []
+    const requestLog = (memoryCache.get("requestLog") as LogEntry[]) || []
     requestLog.unshift(logEntry)
 
     if (requestLog.length > 1000) {
-      requestLog.splice(500) // Keep only latest 500 entries
+      requestLog.splice(500)
     }
 
-    cache.set("requestLog", requestLog)
+    memoryCache.set("requestLog", requestLog)
 
-    // Update statistics
-    const totalRequests = ((cache.get("totalRequests") as number) || 0) + 1
-    cache.set("totalRequests", totalRequests)
+    // Update metrics
+    const totalRequests = ((memoryCache.get("totalRequests") as number) || 0) + 1
+    memoryCache.set("totalRequests", totalRequests)
 
     if (entry.status === "success") {
-      const successfulRequests = ((cache.get("successfulRequests") as number) || 0) + 1
-      cache.set("successfulRequests", successfulRequests)
+      const successfulRequests = ((memoryCache.get("successfulRequests") as number) || 0) + 1
+      memoryCache.set("successfulRequests", successfulRequests)
     } else if (entry.status === "rate_limited") {
-      const rateLimitedRequests = ((cache.get("rateLimitedRequests") as number) || 0) + 1
-      cache.set("rateLimitedRequests", rateLimitedRequests)
+      const rateLimitedRequests = ((memoryCache.get("rateLimitedRequests") as number) || 0) + 1
+      memoryCache.set("rateLimitedRequests", rateLimitedRequests)
     } else {
-      const failedRequests = ((cache.get("failedRequests") as number) || 0) + 1
-      cache.set("failedRequests", failedRequests)
+      const failedRequests = ((memoryCache.get("failedRequests") as number) || 0) + 1
+      memoryCache.set("failedRequests", failedRequests)
     }
 
     if (entry.responseTime) {
-      const totalResponseTime = ((cache.get("totalResponseTime") as number) || 0) + entry.responseTime
-      cache.set("totalResponseTime", totalResponseTime)
+      const totalResponseTime = ((memoryCache.get("totalResponseTime") as number) || 0) + entry.responseTime
+      memoryCache.set("totalResponseTime", totalResponseTime)
     }
   }
 
-  static formatInteractionLog(interactions: InteractionLog[]): string {
+  static formatInteractionLogs(interactions: UserInteraction[]): string {
     return interactions
       .map((interaction, index) => {
         const user = interaction.user
         const chat = interaction.chat
 
-        return `${index + 1}. <b>Bot:</b> @${Utils.sanitizeHtml(interaction.botUsername)}
-<b>User:</b> ${Utils.sanitizeHtml(user.fullName)} (@${Utils.sanitizeHtml(user.username)})
+        return `${index + 1}. <b>Bot:</b> @${HelperUtils.cleanText(interaction.botName)}
+<b>User:</b> ${HelperUtils.cleanText(user.name)} (@${HelperUtils.cleanText(user.username)})
 <b>User ID:</b> <code>${user.id}</code>
-<b>Chat Type:</b> <code>${Utils.sanitizeHtml(chat.type)}</code>
-<b>Update Type:</b> <code>${Utils.sanitizeHtml(interaction.updateType)}</code>
+<b>Chat Type:</b> <code>${HelperUtils.cleanText(chat.type)}</code>
+<b>Update Type:</b> <code>${HelperUtils.cleanText(interaction.updateType)}</code>
 <b>Time:</b> <code>${new Date(interaction.timestamp).toLocaleString()}</code>
 <b>Response Time:</b> <code>${interaction.metadata.responseTime.toFixed(2)}ms</code>
 <b>Token:</b> <code>${interaction.botToken.substring(0, 10)}...</code>`
@@ -421,13 +391,13 @@ class Logger {
   }
 }
 
-// Enhanced HTTP Client with Circuit Breaker Pattern
-class TelegramAPI {
+// Telegram API Client
+class TelegramClient {
   private static circuitBreaker: Map<string, { failures: number; lastFailure: number; isOpen: boolean }> = new Map()
 
-  static async retryOperation<T>(
+  static async executeWithRetry<T>(
     operation: () => Promise<T>,
-    maxRetries: number = CONFIG.RETRY_ATTEMPTS,
+    maxRetries: number = SYSTEM_CONFIG.RETRY_ATTEMPTS,
     baseDelay = 1000,
   ): Promise<T> {
     let lastError: Error | null = null
@@ -440,7 +410,6 @@ class TelegramAPI {
 
         if (attempt === maxRetries - 1) break
 
-        // Handle specific error types
         if (error.message?.includes("rate limit") || error.message?.includes("Too Many Requests")) {
           const retryAfter = error.parameters?.retry_after || 60
           await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000))
@@ -453,7 +422,6 @@ class TelegramAPI {
           continue
         }
 
-        // For other errors, use exponential backoff
         const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000
         await new Promise((resolve) => setTimeout(resolve, delay))
       }
@@ -462,7 +430,7 @@ class TelegramAPI {
     throw lastError || new Error("Operation failed after retries")
   }
 
-  static async sendMessage(
+  static async sendTextMessage(
     botToken: string,
     chatId: string | number,
     text: string,
@@ -471,7 +439,7 @@ class TelegramAPI {
       reply_markup?: any
       disable_web_page_preview?: boolean
     } = {},
-  ): Promise<TelegramResponse> {
+  ): Promise<TelegramAPIResponse> {
     const messageData = {
       chat_id: chatId,
       text: text.substring(0, 4096),
@@ -480,10 +448,10 @@ class TelegramAPI {
       ...options,
     }
 
-    return this.makeRequest(botToken, "sendMessage", messageData)
+    return this.makeAPIRequest(botToken, "sendMessage", messageData)
   }
 
-  static async sendPhoto(
+  static async sendPhotoMessage(
     botToken: string,
     chatId: string | number,
     photo: string,
@@ -492,7 +460,7 @@ class TelegramAPI {
       parse_mode?: "HTML" | "Markdown"
       reply_markup?: any
     } = {},
-  ): Promise<TelegramResponse> {
+  ): Promise<TelegramAPIResponse> {
     const messageData = {
       chat_id: chatId,
       photo,
@@ -501,11 +469,11 @@ class TelegramAPI {
       ...options,
     }
 
-    return this.makeRequest(botToken, "sendPhoto", messageData)
+    return this.makeAPIRequest(botToken, "sendPhoto", messageData)
   }
 
-  static async getBotInfo(botToken: string): Promise<BotInfoResponse> {
-    return this.makeRequest(botToken, "getMe", {}) as Promise<BotInfoResponse>
+  static async getBotInformation(botToken: string): Promise<BotInfo> {
+    return this.makeAPIRequest(botToken, "getMe", {}) as Promise<BotInfo>
   }
 
   static async answerInlineQuery(
@@ -513,27 +481,26 @@ class TelegramAPI {
     inlineQueryId: string,
     results: any[],
     options: { cache_time?: number } = {},
-  ): Promise<TelegramResponse> {
+  ): Promise<TelegramAPIResponse> {
     const queryData = {
       inline_query_id: inlineQueryId,
-      results: results.slice(0, 50), // Telegram limit
+      results: results.slice(0, 50),
       cache_time: options.cache_time || 1,
     }
 
-    return this.makeRequest(botToken, "answerInlineQuery", queryData)
+    return this.makeAPIRequest(botToken, "answerInlineQuery", queryData)
   }
 
-  private static async makeRequest(botToken: string, method: string, data: any): Promise<TelegramResponse> {
+  private static async makeAPIRequest(botToken: string, method: string, data: any): Promise<TelegramAPIResponse> {
     const circuitKey = `${botToken}_${method}`
     const circuit = this.circuitBreaker.get(circuitKey)
 
-    // Check circuit breaker
     if (circuit?.isOpen && Date.now() - circuit.lastFailure < 60000) {
       throw new Error("Circuit breaker is open")
     }
 
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT)
+    const timeoutId = setTimeout(() => controller.abort(), SYSTEM_CONFIG.REQUEST_TIMEOUT)
 
     try {
       const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
@@ -545,13 +512,12 @@ class TelegramAPI {
 
       clearTimeout(timeoutId)
 
-      const result = (await response.json()) as TelegramResponse
+      const result = (await response.json()) as TelegramAPIResponse
 
       if (!result.ok) {
         throw new Error(`Telegram API error: ${result.description}`)
       }
 
-      // Reset circuit breaker on success
       if (circuit) {
         circuit.failures = 0
         circuit.isOpen = false
@@ -561,7 +527,6 @@ class TelegramAPI {
     } catch (error: any) {
       clearTimeout(timeoutId)
 
-      // Update circuit breaker
       const currentCircuit = this.circuitBreaker.get(circuitKey) || { failures: 0, lastFailure: 0, isOpen: false }
       currentCircuit.failures++
       currentCircuit.lastFailure = Date.now()
@@ -573,143 +538,72 @@ class TelegramAPI {
   }
 }
 
-// Enhanced Ad Management System
-class AdManager {
-  static isAdScheduleActive(ad: AdContent): boolean {
-    if (!ad.schedule) return true
+// Campaign Manager
+class CampaignManager {
+  static getActiveCampaigns(chatType?: string, userLanguage?: string, userId?: number): Campaign[] {
+    return ACTIVE_CAMPAIGNS.filter((campaign) => {
+      if (!campaign.active) return false
 
-    const now = new Date()
-    const startTime = new Date(ad.schedule.startTime)
-    const endTime = new Date(ad.schedule.endTime)
-
-    if (now < startTime || now > endTime) return false
-
-    if (ad.schedule.daysOfWeek) {
-      const currentDay = now.getDay()
-      if (!ad.schedule.daysOfWeek.includes(currentDay)) return false
-    }
-
-    if (ad.schedule.hoursOfDay) {
-      const currentHour = now.getHours()
-      if (!ad.schedule.hoursOfDay.includes(currentHour)) return false
-    }
-
-    return true
-  }
-
-  static getActiveAds(chatType?: string, userLanguage?: string, userId?: number): AdContent[] {
-    return AD_CAMPAIGNS.filter((ad) => {
-      if (!ad.active) return false
-
-      // Check schedule
-      if (!this.isAdScheduleActive(ad)) return false
-
-      // Check targeting
-      if (ad.targeting?.chatTypes && chatType) {
-        if (!ad.targeting.chatTypes.includes(chatType)) return false
-      }
-
-      if (ad.targeting?.languages && userLanguage) {
-        if (!ad.targeting.languages.includes(userLanguage)) return false
-      }
-
-      if (ad.targeting?.excludeUsers && userId) {
-        if (ad.targeting.excludeUsers.includes(userId)) return false
-      }
-
-      if (ad.targeting?.includeUsers && userId) {
-        if (!ad.targeting.includeUsers.includes(userId)) return false
+      if (campaign.targeting?.chatTypes && chatType) {
+        if (!campaign.targeting.chatTypes.includes(chatType)) return false
       }
 
       return true
-    }).sort((a, b) => {
-      // Sort by priority, then by weight (if available)
-      if (a.priority !== b.priority) {
-        return a.priority - b.priority
-      }
-      return (b.weight || 1) - (a.weight || 1)
-    })
+    }).sort((a, b) => a.priority - b.priority)
   }
 
-  static trackAdInteraction(adId: string, interactionType: "impression" | "click" | "conversion"): void {
-    const ad = AD_CAMPAIGNS.find((a) => a.id === adId)
-    if (!ad) return
+  static trackCampaignMetric(campaignId: string, metricType: "impression" | "click"): void {
+    const campaign = ACTIVE_CAMPAIGNS.find((c) => c.id === campaignId)
+    if (!campaign) return
 
-    switch (interactionType) {
+    switch (metricType) {
       case "impression":
-        ad.analytics.impressions++
-        ad.analytics.lastShown = new Date().toISOString()
+        campaign.metrics.impressions++
+        campaign.metrics.lastShown = new Date().toISOString()
         break
       case "click":
-        ad.analytics.clicks++
-        break
-      case "conversion":
-        ad.analytics.conversions++
+        campaign.metrics.clicks++
         break
     }
 
-    // Store analytics in cache for persistence
-    const analyticsKey = `ad_analytics_${adId}`
-    cache.set(analyticsKey, ad.analytics)
+    const metricsKey = `campaign_metrics_${campaignId}`
+    memoryCache.set(metricsKey, campaign.metrics)
   }
 
-  static getAdAnalytics(): Array<{ id: string; analytics: any }> {
-    return AD_CAMPAIGNS.map((ad) => ({
-      id: ad.id,
-      analytics: {
-        ...ad.analytics,
+  static getCampaignAnalytics(): Array<{ id: string; metrics: any }> {
+    return ACTIVE_CAMPAIGNS.map((campaign) => ({
+      id: campaign.id,
+      metrics: {
+        ...campaign.metrics,
         ctr:
-          ad.analytics.impressions > 0
-            ? ((ad.analytics.clicks / ad.analytics.impressions) * 100).toFixed(2) + "%"
+          campaign.metrics.impressions > 0
+            ? ((campaign.metrics.clicks / campaign.metrics.impressions) * 100).toFixed(2) + "%"
             : "0%",
-        conversionRate:
-          ad.analytics.clicks > 0 ? ((ad.analytics.conversions / ad.analytics.clicks) * 100).toFixed(2) + "%" : "0%",
       },
     }))
   }
 
-  static async sendAds(
+  static async deliverCampaigns(
     botToken: string,
     chatId: string | number,
     chatType: string,
     userLanguage?: string,
-    isContactShared = false,
     userId?: number,
   ): Promise<void> {
-    const ads = this.getActiveAds(chatType, userLanguage, userId)
+    const campaigns = this.getActiveCampaigns(chatType, userLanguage, userId)
     const promises: Promise<any>[] = []
 
-    for (let i = 0; i < ads.length; i++) {
-      const ad = ads[i]
+    for (const campaign of campaigns) {
+      CampaignManager.trackCampaignMetric(campaign.id, "impression")
 
-      // Track impression
-      AdManager.trackAdInteraction(ad.id, "impression")
-
-      if (ad.type === "text") {
-        if (i === 0 && chatType === "private" && !isContactShared) {
-          // Add contact request to first ad for private chats
-          const replyMarkup = {
-            keyboard: [[{ text: "I agree", request_contact: true }]],
-            resize_keyboard: true,
-            one_time_keyboard: true,
-          }
-
-          promises.push(
-            TelegramAPI.retryOperation(() =>
-              TelegramAPI.sendMessage(botToken, chatId, ad.content.text!, { reply_markup: replyMarkup }),
-            ),
-          )
-        } else {
-          promises.push(TelegramAPI.retryOperation(() => TelegramAPI.sendMessage(botToken, chatId, ad.content.text!)))
-        }
-      } else if (ad.type === "photo_text_button" && ad.content.photos?.length) {
-        const randomPhoto = ad.content.photos[Math.floor(Math.random() * ad.content.photos.length)]
-        const buttons = ad.content.buttons?.map((button) => [button]) || []
+      if (campaign.type === "photo_with_buttons" && campaign.content.photos?.length) {
+        const randomPhoto = campaign.content.photos[Math.floor(Math.random() * campaign.content.photos.length)]
+        const buttons = campaign.content.buttons?.map((button) => [button]) || []
 
         promises.push(
-          TelegramAPI.retryOperation(() =>
-            TelegramAPI.sendPhoto(botToken, chatId, randomPhoto, {
-              caption: ad.content.text,
+          TelegramClient.executeWithRetry(() =>
+            TelegramClient.sendPhotoMessage(botToken, chatId, randomPhoto, {
+              caption: campaign.content.caption,
               reply_markup: buttons.length > 0 ? { inline_keyboard: buttons } : undefined,
             }),
           ),
@@ -722,160 +616,85 @@ class AdManager {
 
   static generateInlineResults(): any[] {
     const results: any[] = []
-    const activeAds = this.getActiveAds()
+    const activeCampaigns = this.getActiveCampaigns()
 
-    activeAds.forEach((ad, index) => {
-      if (ad.type === "text") {
-        results.push({
-          type: "article",
-          id: `ad_${ad.id}_${index}`,
-          title: "Premium Content",
-          description: "Click to view premium content",
-          input_message_content: {
-            message_text: ad.content.text,
-            parse_mode: "HTML",
-          },
-        })
-      } else if (ad.type === "photo_text_button" && ad.content.photos?.length) {
-        const randomPhoto = ad.content.photos[Math.floor(Math.random() * ad.content.photos.length)]
-        const buttons = ad.content.buttons?.map((button) => [button]) || []
+    activeCampaigns.forEach((campaign, index) => {
+      if (campaign.type === "photo_with_buttons" && campaign.content.photos?.length) {
+        const randomPhoto = campaign.content.photos[Math.floor(Math.random() * campaign.content.photos.length)]
+        const buttons = campaign.content.buttons?.map((button) => [button]) || []
 
         results.push({
           type: "photo",
-          id: `ad_${ad.id}_${index}`,
+          id: `campaign_${campaign.id}_${index}`,
           photo_url: randomPhoto,
           thumb_url: randomPhoto,
-          caption: ad.content.text,
+          caption: campaign.content.caption,
           parse_mode: "HTML",
           reply_markup: buttons.length > 0 ? { inline_keyboard: buttons } : undefined,
         })
       }
     })
 
-    return results.slice(0, 10) // Limit to 10 results
+    return results.slice(0, 10)
   }
 }
 
-// Simplified Log Bot Manager with Single Bot
+// Log Bot Manager
 class LogBotManager {
   private static botCooldownUntil = 0
 
-  static async sendLogs(): Promise<void> {
-    if (serverState.interactionBuffer.length < CONFIG.MAX_INTERACTIONS_BUFFER) return
+  static async sendInteractionLogs(): Promise<void> {
+    if (systemState.interactionBuffer.length < SYSTEM_CONFIG.MAX_INTERACTION_BUFFER) return
     if (Date.now() < this.botCooldownUntil) return
 
-    const logsToSend = serverState.interactionBuffer.slice(0, CONFIG.MAX_INTERACTIONS_BUFFER)
-    const message = Logger.formatInteractionLog(logsToSend)
+    const logsToSend = systemState.interactionBuffer.slice(0, SYSTEM_CONFIG.MAX_INTERACTION_BUFFER)
+    const message = RequestLogger.formatInteractionLogs(logsToSend)
 
     try {
-      await TelegramAPI.retryOperation(() =>
-        TelegramAPI.sendMessage(LOG_BOT_TOKEN.token, CONFIG.LOG_CHANNEL_ID, message),
+      await TelegramClient.executeWithRetry(() =>
+        TelegramClient.sendTextMessage(MAIN_BOT.token, SYSTEM_CONFIG.LOG_CHANNEL_ID, message),
       )
 
-      LOG_BOT_TOKEN.health = Math.min(100, LOG_BOT_TOKEN.health + 5) // Improve health on success
-      LOG_BOT_TOKEN.lastUsed = Date.now()
+      MAIN_BOT.health = Math.min(100, MAIN_BOT.health + 5)
+      MAIN_BOT.lastUsed = Date.now()
 
-      console.log(`✅ Logs sent successfully using ${LOG_BOT_TOKEN.name} bot`)
+      console.log(`✅ Logs sent successfully using ${MAIN_BOT.name} bot`)
 
-      // Remove sent logs from buffer
-      serverState.interactionBuffer.splice(0, CONFIG.MAX_INTERACTIONS_BUFFER)
+      systemState.interactionBuffer.splice(0, SYSTEM_CONFIG.MAX_INTERACTION_BUFFER)
     } catch (error: any) {
-      LOG_BOT_TOKEN.health = Math.max(0, LOG_BOT_TOKEN.health - 10) // Decrease health on failure
+      MAIN_BOT.health = Math.max(0, MAIN_BOT.health - 10)
 
       if (error.message?.includes("Too Many Requests")) {
         const retryAfter = error.parameters?.retry_after || 60
         this.botCooldownUntil = Date.now() + retryAfter * 1000
-        console.warn(`⚠️ ${LOG_BOT_TOKEN.name} bot rate limited for ${retryAfter}s`)
+        console.warn(`⚠️ ${MAIN_BOT.name} bot rate limited for ${retryAfter}s`)
       } else {
-        console.error(`❌ Failed to send logs with ${LOG_BOT_TOKEN.name} bot:`, error.message)
+        console.error(`❌ Failed to send logs with ${MAIN_BOT.name} bot:`, error.message)
       }
     }
   }
 
-  static getBotHealthStatus(): Array<{ name: string; health: number; lastUsed: number; inCooldown: boolean }> {
+  static getBotHealthInfo(): Array<{ name: string; health: number; lastUsed: number; inCooldown: boolean }> {
     const now = Date.now()
     return [
       {
-        name: LOG_BOT_TOKEN.name,
-        health: LOG_BOT_TOKEN.health,
-        lastUsed: LOG_BOT_TOKEN.lastUsed,
+        name: MAIN_BOT.name,
+        health: MAIN_BOT.health,
+        lastUsed: MAIN_BOT.lastUsed,
         inCooldown: this.botCooldownUntil > now,
       },
     ]
   }
 }
 
-// Enhanced Contact Handler
-class ContactHandler {
-  static async handleContactShare(botToken: string, update: TelegramUpdate, botUsername: string): Promise<void> {
-    const contact = update.message?.contact
-    const user = update.message?.from
-    const chat = update.message?.chat
-
-    if (!contact || !user || !chat) return
-
-    const now = new Date()
-    const istOffset = 5.5 * 60 * 60 * 1000
-    const istDate = new Date(now.getTime() + istOffset)
-
-    const timeStr = istDate.toLocaleString("en-IN", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: true,
-    })
-
-    const contactMessage = `🆕 <b>New Contact Shared</b>
-
-🤖 <b>Bot:</b> @${Utils.sanitizeHtml(botUsername)}
-🔑 <b>Token:</b> <code>${botToken.substring(0, 10)}...</code>
-
-👤 <b>User Details:</b>
-• Name: ${Utils.sanitizeHtml(user.first_name)} ${Utils.sanitizeHtml(user.last_name || "")}
-• Username: @${Utils.sanitizeHtml(user.username || "none")}
-• User ID: <code>${user.id}</code>
-• Language: ${Utils.sanitizeHtml(user.language_code || "unknown")}
-• Is Bot: ${user.is_bot ? "✅ Yes" : "❌ No"}
-
-📞 <b>Contact Details:</b>
-• Name: ${Utils.sanitizeHtml(contact.first_name)} ${Utils.sanitizeHtml(contact.last_name || "")}
-• Phone: <code>${Utils.sanitizeHtml(contact.phone_number)}</code>
-• Contact User ID: <code>${contact.user_id || "N/A"}</code>
-
-💬 <b>Chat Info:</b>
-• Chat ID: <code>${chat.id}</code>
-• Chat Type: ${Utils.sanitizeHtml(chat.type)}
-
-🕐 <b>Time (IST):</b> ${timeStr}
-
-🔗 <b>Actions:</b>
-• <a href="tg://user?id=${user.id}">Open User Chat</a>`
-
-    try {
-      await TelegramAPI.retryOperation(() =>
-        TelegramAPI.sendMessage(CONFIG.ADMIN_BOT_TOKEN, CONFIG.ADMIN_CHANNEL_ID, contactMessage),
-      )
-
-      console.log(`📞 Contact shared notification sent for user ${user.id}`)
-    } catch (error) {
-      console.error("❌ Failed to send contact notification:", error)
-    }
-  }
-}
-
-// Handler Functions (moved outside of serve function)
-async function processUpdate(
+// Update Processor
+async function processIncomingUpdate(
   update: TelegramUpdate,
   botToken: string,
   userAgent: string,
   clientIP: string,
   startTime: number,
 ): Promise<void> {
-  // Extract update information
   let chatId: string | number | null = null
   let user: TelegramUser | null = null
   let chat: TelegramChat | null = null
@@ -908,22 +727,20 @@ async function processUpdate(
 
   if (!updateType) return
 
-  // Get bot information
-  const botInfo = await TelegramAPI.getBotInfo(botToken)
-  const botUsername = botInfo.ok && botInfo.result ? botInfo.result.username : "unknown"
+  const botInfo = await TelegramClient.getBotInformation(botToken)
+  const botName = botInfo.ok && botInfo.result ? botInfo.result.username : "unknown"
 
-  // Log interaction
   if (user) {
-    const interaction: InteractionLog = {
-      id: Utils.generateId(),
+    const interaction: UserInteraction = {
+      id: HelperUtils.createUniqueId(),
       timestamp: new Date().toISOString(),
-      botUsername,
+      botName,
       botToken,
       user: {
         id: user.id,
-        fullName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
+        name: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
         username: user.username || "none",
-        languageCode: user.language_code,
+        language: user.language_code,
         isBot: user.is_bot || false,
       },
       chat: chat
@@ -936,46 +753,36 @@ async function processUpdate(
       updateType,
       metadata: {
         userAgent,
-        ipAddress: clientIP,
+        clientIP,
         responseTime: performance.now() - startTime,
       },
     }
 
-    serverState.addInteraction(interaction)
+    systemState.logInteraction(interaction)
 
-    // Trigger log sending if buffer is full
-    if (serverState.interactionBuffer.length >= CONFIG.MAX_INTERACTIONS_BUFFER) {
-      LogBotManager.sendLogs().catch((error) => console.error("❌ Background log sending failed:", error))
+    if (systemState.interactionBuffer.length >= SYSTEM_CONFIG.MAX_INTERACTION_BUFFER) {
+      LogBotManager.sendInteractionLogs().catch((error) => console.error("❌ Background log sending failed:", error))
     }
   }
 
-  // Handle inline queries
   if (updateType === "inline_query" && update.inline_query?.id) {
-    const results = AdManager.generateInlineResults()
-    await TelegramAPI.answerInlineQuery(botToken, update.inline_query.id, results)
+    const results = CampaignManager.generateInlineResults()
+    await TelegramClient.answerInlineQuery(botToken, update.inline_query.id, results)
     return
   }
 
-  // Handle contact sharing
-  if (update.message?.contact) {
-    await ContactHandler.handleContactShare(botToken, update, botUsername)
-  }
-
-  // Send ads if we have a chat ID
   if (chatId && chat) {
-    const isContactShared = !!update.message?.contact
     const userId = user?.id
-
-    // Send ads asynchronously for better performance
-    AdManager.sendAds(botToken, chatId, chat.type, user?.language_code, isContactShared, userId).catch((error) =>
-      console.error("❌ Ad sending failed:", error),
+    CampaignManager.deliverCampaigns(botToken, chatId, chat.type, user?.language_code, userId).catch((error) =>
+      console.error("❌ Campaign delivery failed:", error),
     )
   }
 }
 
-function handleStatusPage(): Response {
-  const stats = serverState.getStats()
-  const uptime = Utils.formatUptime(stats.uptime)
+// Status Page Handler
+function generateStatusPage(): Response {
+  const metrics = systemState.getSystemMetrics()
+  const uptime = HelperUtils.formatDuration(metrics.uptime)
 
   const html = `
 <!DOCTYPE html>
@@ -983,11 +790,11 @@ function handleStatusPage(): Response {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram Bot Server Status</title>
+    <title>Bot Server Status</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
@@ -995,95 +802,102 @@ function handleStatusPage(): Response {
             justify-content: center;
             padding: 20px;
         }
-        .container {
+        .status-container {
             background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(15px);
+            border-radius: 25px;
+            padding: 50px;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
             text-align: center;
-            max-width: 500px;
+            max-width: 600px;
             width: 100%;
         }
         .status-icon {
-            font-size: 4rem;
-            margin-bottom: 20px;
-            animation: pulse 2s infinite;
+            font-size: 5rem;
+            margin-bottom: 25px;
+            animation: bounce 2s infinite;
         }
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.05); }
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+            40% { transform: translateY(-10px); }
+            60% { transform: translateY(-5px); }
         }
         h1 {
             color: #2d3748;
-            margin-bottom: 30px;
-            font-size: 2rem;
-            font-weight: 700;
+            margin-bottom: 35px;
+            font-size: 2.5rem;
+            font-weight: 800;
         }
-        .stats-grid {
+        .metrics-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 30px;
+            gap: 25px;
+            margin-bottom: 35px;
         }
-        .stat-card {
-            background: #f7fafc;
-            padding: 20px;
-            border-radius: 12px;
-            border-left: 4px solid #4299e1;
+        .metric-card {
+            background: #f8fafc;
+            padding: 25px;
+            border-radius: 15px;
+            border-left: 5px solid #4299e1;
+            transition: transform 0.3s ease;
         }
-        .stat-value {
-            font-size: 1.5rem;
+        .metric-card:hover {
+            transform: translateY(-5px);
+        }
+        .metric-value {
+            font-size: 1.8rem;
             font-weight: bold;
             color: #2d3748;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
         }
-        .stat-label {
+        .metric-label {
             color: #718096;
-            font-size: 0.9rem;
+            font-size: 1rem;
+            font-weight: 600;
         }
-        .status-badge {
+        .status-indicator {
             display: inline-block;
             background: #48bb78;
             color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-weight: 600;
-            margin-bottom: 20px;
+            padding: 12px 20px;
+            border-radius: 25px;
+            font-weight: 700;
+            margin-bottom: 25px;
+            font-size: 1.1rem;
         }
-        .footer {
+        .footer-info {
             color: #718096;
-            font-size: 0.8rem;
-            margin-top: 20px;
+            font-size: 0.9rem;
+            margin-top: 25px;
         }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="status-container">
         <div class="status-icon">🚀</div>
-        <h1>Server Status</h1>
-        <div class="status-badge">🟢 Online & Running</div>
+        <h1>System Status</h1>
+        <div class="status-indicator">🟢 Online & Operational</div>
         
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value">${uptime}</div>
-                <div class="stat-label">Uptime</div>
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-value">${uptime}</div>
+                <div class="metric-label">System Uptime</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">${stats.totalRequests.toLocaleString()}</div>
-                <div class="stat-label">Total Requests</div>
+            <div class="metric-card">
+                <div class="metric-value">${metrics.totalRequests.toLocaleString()}</div>
+                <div class="metric-label">Total Requests</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">${stats.activeConnections}</div>
-                <div class="stat-label">Active Connections</div>
+            <div class="metric-card">
+                <div class="metric-value">${metrics.activeConnections}</div>
+                <div class="metric-label">Active Connections</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">${stats.averageResponseTime.toFixed(1)}ms</div>
-                <div class="stat-label">Avg Response Time</div>
+            <div class="metric-card">
+                <div class="metric-value">${metrics.averageResponseTime.toFixed(1)}ms</div>
+                <div class="metric-label">Avg Response Time</div>
             </div>
         </div>
         
-        <div class="footer">
+        <div class="footer-info">
             <p>🤖 Advanced Telegram Bot Server</p>
             <p>Last updated: ${new Date().toLocaleString()}</p>
         </div>
@@ -1096,21 +910,22 @@ function handleStatusPage(): Response {
   })
 }
 
-function handleDashboard(url: URL): Response {
+// Dashboard Handler
+function generateDashboard(url: URL): Response {
   const password = url.searchParams.get("pass")
 
-  if (password !== CONFIG.DASHBOARD_PASSWORD) {
+  if (password !== SYSTEM_CONFIG.DASHBOARD_PASSWORD) {
     const html = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Protected Dashboard</title>
+    <title>Dashboard Access</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
             min-height: 100vh;
             display: flex;
@@ -1118,81 +933,83 @@ function handleDashboard(url: URL): Response {
             justify-content: center;
             padding: 20px;
         }
-        .login-container {
+        .access-container {
             background: white;
-            padding: 40px;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 50px;
+            border-radius: 25px;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
             text-align: center;
-            max-width: 400px;
+            max-width: 450px;
             width: 100%;
         }
         .lock-icon {
-            font-size: 3rem;
-            margin-bottom: 20px;
+            font-size: 4rem;
+            margin-bottom: 25px;
             color: #4299e1;
         }
         h1 {
             color: #2d3748;
-            margin-bottom: 30px;
-            font-size: 1.8rem;
+            margin-bottom: 35px;
+            font-size: 2rem;
+            font-weight: 700;
         }
-        .form-group {
-            margin-bottom: 20px;
+        .input-group {
+            margin-bottom: 25px;
             text-align: left;
         }
         label {
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
             color: #4a5568;
-            font-weight: 600;
+            font-weight: 700;
         }
         input[type="password"] {
             width: 100%;
-            padding: 12px 16px;
+            padding: 15px 20px;
             border: 2px solid #e2e8f0;
-            border-radius: 8px;
-            font-size: 1rem;
+            border-radius: 10px;
+            font-size: 1.1rem;
             transition: border-color 0.3s;
         }
         input[type="password"]:focus {
             outline: none;
             border-color: #4299e1;
         }
-        .btn {
+        .access-btn {
             width: 100%;
-            padding: 12px;
+            padding: 15px;
             background: #4299e1;
             color: white;
             border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: 700;
             cursor: pointer;
             transition: background-color 0.3s;
         }
-        .btn:hover {
+        .access-btn:hover {
             background: #3182ce;
         }
-        .error {
+        .error-message {
             color: #e53e3e;
-            margin-top: 15px;
-            font-size: 0.9rem;
+            margin-top: 20px;
+            font-size: 1rem;
+            font-weight: 600;
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
+    <div class="access-container">
         <div class="lock-icon">🔒</div>
         <h1>Dashboard Access</h1>
         <form method="GET" action="/status">
-            <div class="form-group">
-                <label for="password">Enter Password:</label>
+            <div class="input-group">
+                <label for="password">Enter Access Password:</label>
                 <input type="password" id="password" name="pass" required>
             </div>
-            <button type="submit" class="btn">Access Dashboard</button>
+            <button type="submit" class="access-btn">Access Dashboard</button>
         </form>
-        ${password ? '<div class="error">❌ Invalid password. Please try again.</div>' : ""}
+        ${password ? '<div class="error-message">❌ Invalid password. Please try again.</div>' : ""}
     </div>
 </body>
 </html>`
@@ -1202,11 +1019,10 @@ function handleDashboard(url: URL): Response {
     })
   }
 
-  // Generate dashboard
-  const stats = serverState.getStats()
-  const requestLog = (cache.get("requestLog") as RequestLogEntry[]) || []
+  const metrics = systemState.getSystemMetrics()
+  const requestLog = (memoryCache.get("requestLog") as LogEntry[]) || []
   const recentLogs = requestLog.slice(0, 20)
-  const botHealthStatus = LogBotManager.getBotHealthStatus()
+  const botHealthInfo = LogBotManager.getBotHealthInfo()
 
   const html = `
 <!DOCTYPE html>
@@ -1218,193 +1034,199 @@ function handleDashboard(url: URL): Response {
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f8fafc;
-            color: #2d3748;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f1f5f9;
+            color: #1e293b;
             line-height: 1.6;
         }
-        .header {
+        .dashboard-header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 2rem;
+            padding: 3rem;
             text-align: center;
         }
-        .header h1 {
-            font-size: 2.5rem;
+        .dashboard-header h1 {
+            font-size: 3rem;
             margin-bottom: 0.5rem;
+            font-weight: 800;
         }
-        .header p {
+        .dashboard-header p {
             opacity: 0.9;
-            font-size: 1.1rem;
+            font-size: 1.2rem;
         }
-        .container {
-            max-width: 1200px;
+        .dashboard-container {
+            max-width: 1400px;
             margin: 0 auto;
-            padding: 2rem;
+            padding: 3rem;
         }
-        .stats-grid {
+        .metrics-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
         }
-        .stat-card {
+        .metric-card {
             background: white;
-            padding: 1.5rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-            border-left: 4px solid #4299e1;
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
+            border-left: 5px solid #4299e1;
+            transition: transform 0.3s ease;
         }
-        .stat-card.success { border-left-color: #48bb78; }
-        .stat-card.warning { border-left-color: #ed8936; }
-        .stat-card.error { border-left-color: #f56565; }
-        .stat-value {
-            font-size: 2rem;
-            font-weight: bold;
+        .metric-card:hover {
+            transform: translateY(-5px);
+        }
+        .metric-card.success { border-left-color: #10b981; }
+        .metric-card.warning { border-left-color: #f59e0b; }
+        .metric-card.error { border-left-color: #ef4444; }
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: 800;
             margin-bottom: 0.5rem;
         }
-        .stat-label {
-            color: #718096;
-            font-size: 0.9rem;
+        .metric-label {
+            color: #64748b;
+            font-size: 1rem;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 1px;
+            font-weight: 600;
         }
-        .section {
+        .dashboard-section {
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-            margin-bottom: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
+            margin-bottom: 3rem;
             overflow: hidden;
         }
         .section-header {
-            background: #f7fafc;
-            padding: 1rem 1.5rem;
+            background: #f8fafc;
+            padding: 1.5rem 2rem;
             border-bottom: 1px solid #e2e8f0;
-            font-weight: 600;
-            font-size: 1.1rem;
+            font-weight: 700;
+            font-size: 1.2rem;
         }
         .section-content {
-            padding: 1.5rem;
+            padding: 2rem;
         }
-        .table {
+        .data-table {
             width: 100%;
             border-collapse: collapse;
         }
-        .table th,
-        .table td {
-            padding: 0.75rem;
+        .data-table th,
+        .data-table td {
+            padding: 1rem;
             text-align: left;
             border-bottom: 1px solid #e2e8f0;
         }
-        .table th {
-            background: #f7fafc;
-            font-weight: 600;
-            color: #4a5568;
+        .data-table th {
+            background: #f8fafc;
+            font-weight: 700;
+            color: #475569;
         }
-        .status-success { color: #48bb78; font-weight: 600; }
-        .status-failed { color: #f56565; font-weight: 600; }
-        .status-rate_limited { color: #ed8936; font-weight: 600; }
-        .health-bar {
+        .status-success { color: #10b981; font-weight: 700; }
+        .status-failed { color: #ef4444; font-weight: 700; }
+        .status-rate_limited { color: #f59e0b; font-weight: 700; }
+        .health-indicator {
             width: 100%;
-            height: 8px;
+            height: 10px;
             background: #e2e8f0;
-            border-radius: 4px;
+            border-radius: 5px;
             overflow: hidden;
         }
         .health-fill {
             height: 100%;
             transition: width 0.3s ease;
         }
-        .health-good { background: #48bb78; }
-        .health-warning { background: #ed8936; }
-        .health-critical { background: #f56565; }
-        .refresh-btn {
+        .health-excellent { background: #10b981; }
+        .health-good { background: #f59e0b; }
+        .health-poor { background: #ef4444; }
+        .refresh-button {
             position: fixed;
-            bottom: 2rem;
-            right: 2rem;
+            bottom: 3rem;
+            right: 3rem;
             background: #4299e1;
             color: white;
             border: none;
-            padding: 1rem;
+            padding: 1.2rem;
             border-radius: 50%;
-            font-size: 1.2rem;
+            font-size: 1.5rem;
             cursor: pointer;
-            box-shadow: 0 4px 12px rgba(66, 153, 225, 0.3);
+            box-shadow: 0 8px 25px rgba(66, 153, 225, 0.4);
             transition: transform 0.2s;
         }
-        .refresh-btn:hover {
+        .refresh-button:hover {
             transform: scale(1.1);
         }
         @media (max-width: 768px) {
-            .container { padding: 1rem; }
-            .stats-grid { grid-template-columns: 1fr; }
-            .table { font-size: 0.9rem; }
+            .dashboard-container { padding: 1.5rem; }
+            .metrics-grid { grid-template-columns: 1fr; }
+            .data-table { font-size: 0.9rem; }
         }
     </style>
 </head>
 <body>
-    <div class="header">
+    <div class="dashboard-header">
         <h1>🚀 Advanced Bot Dashboard</h1>
-        <p>Real-time monitoring and analytics</p>
+        <p>Real-time monitoring and comprehensive analytics</p>
     </div>
 
-    <div class="container">
-        <!-- Statistics Overview -->
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value">${stats.totalRequests.toLocaleString()}</div>
-                <div class="stat-label">Total Requests</div>
+    <div class="dashboard-container">
+        <!-- System Metrics -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-value">${metrics.totalRequests.toLocaleString()}</div>
+                <div class="metric-label">Total Requests</div>
             </div>
-            <div class="stat-card success">
-                <div class="stat-value">${stats.successfulRequests.toLocaleString()}</div>
-                <div class="stat-label">Successful</div>
+            <div class="metric-card success">
+                <div class="metric-value">${metrics.successfulRequests.toLocaleString()}</div>
+                <div class="metric-label">Successful</div>
             </div>
-            <div class="stat-card error">
-                <div class="stat-value">${stats.failedRequests.toLocaleString()}</div>
-                <div class="stat-label">Failed</div>
+            <div class="metric-card error">
+                <div class="metric-value">${metrics.failedRequests.toLocaleString()}</div>
+                <div class="metric-label">Failed</div>
             </div>
-            <div class="stat-card warning">
-                <div class="stat-value">${stats.rateLimitedRequests.toLocaleString()}</div>
-                <div class="stat-label">Rate Limited</div>
+            <div class="metric-card warning">
+                <div class="metric-value">${metrics.rateLimitedRequests.toLocaleString()}</div>
+                <div class="metric-label">Rate Limited</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">${stats.averageResponseTime.toFixed(1)}ms</div>
-                <div class="stat-label">Avg Response Time</div>
+            <div class="metric-card">
+                <div class="metric-value">${metrics.averageResponseTime.toFixed(1)}ms</div>
+                <div class="metric-label">Avg Response Time</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">${Utils.formatUptime(stats.uptime)}</div>
-                <div class="stat-label">Uptime</div>
+            <div class="metric-card">
+                <div class="metric-value">${HelperUtils.formatDuration(metrics.uptime)}</div>
+                <div class="metric-label">System Uptime</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">${stats.activeConnections}</div>
-                <div class="stat-label">Active Connections</div>
+            <div class="metric-card">
+                <div class="metric-value">${metrics.activeConnections}</div>
+                <div class="metric-label">Active Connections</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value">${Utils.formatBytes(stats.memoryUsage.heapUsed)}</div>
-                <div class="stat-label">Memory Usage</div>
+            <div class="metric-card">
+                <div class="metric-value">${HelperUtils.formatFileSize(metrics.memoryUsage.heapUsed)}</div>
+                <div class="metric-label">Memory Usage</div>
             </div>
         </div>
 
-        <!-- Log Bot Health Status -->
-        <div class="section">
-            <div class="section-header">🤖 Log Bot Health Status</div>
+        <!-- Bot Health Status -->
+        <div class="dashboard-section">
+            <div class="section-header">🤖 Bot Health Status</div>
             <div class="section-content">
-                <div class="stats-grid">
-                    ${botHealthStatus
+                <div class="metrics-grid">
+                    ${botHealthInfo
                       .map(
                         (bot) => `
-                        <div class="stat-card">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                                <strong>${bot.name}</strong>
-                                <span style="color: ${bot.inCooldown ? "#ed8936" : "#48bb78"};">
+                        <div class="metric-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                                <strong style="font-size: 1.1rem;">${bot.name}</strong>
+                                <span style="color: ${bot.inCooldown ? "#f59e0b" : "#10b981"}; font-weight: 700;">
                                     ${bot.inCooldown ? "⏸️ Cooldown" : "✅ Active"}
                                 </span>
                             </div>
-                            <div class="health-bar">
-                                <div class="health-fill ${bot.health >= 70 ? "health-good" : bot.health >= 40 ? "health-warning" : "health-critical"}" 
+                            <div class="health-indicator">
+                                <div class="health-fill ${bot.health >= 70 ? "health-excellent" : bot.health >= 40 ? "health-good" : "health-poor"}" 
                                      style="width: ${bot.health}%"></div>
                             </div>
-                            <div style="margin-top: 0.5rem; font-size: 0.9rem; color: #718096;">
+                            <div style="margin-top: 1rem; font-size: 0.9rem; color: #64748b;">
                                 Health: ${bot.health}% | Last used: ${bot.lastUsed ? new Date(bot.lastUsed).toLocaleTimeString() : "Never"}
                             </div>
                         </div>
@@ -1416,18 +1238,18 @@ function handleDashboard(url: URL): Response {
         </div>
 
         <!-- Recent Request Logs -->
-        <div class="section">
+        <div class="dashboard-section">
             <div class="section-header">📊 Recent Request Logs (Last 20)</div>
             <div class="section-content">
                 <div style="overflow-x: auto;">
-                    <table class="table">
+                    <table class="data-table">
                         <thead>
                             <tr>
                                 <th>Timestamp</th>
                                 <th>Bot Token</th>
                                 <th>Status</th>
                                 <th>Response Time</th>
-                                <th>IP Address</th>
+                                <th>Client IP</th>
                                 <th>Error Details</th>
                             </tr>
                         </thead>
@@ -1437,11 +1259,11 @@ function handleDashboard(url: URL): Response {
                                 (log) => `
                                 <tr>
                                     <td>${new Date(log.timestamp).toLocaleString()}</td>
-                                    <td><code>${log.token.substring(0, 10)}...</code></td>
+                                    <td><code>${log.botToken.substring(0, 10)}...</code></td>
                                     <td class="status-${log.status}">${log.status.toUpperCase()}</td>
                                     <td>${log.responseTime.toFixed(2)}ms</td>
-                                    <td><code>${log.ipAddress || "unknown"}</code></td>
-                                    <td>${log.errorReason || "-"}</td>
+                                    <td><code>${log.clientIP || "unknown"}</code></td>
+                                    <td>${log.errorMessage || "-"}</td>
                                 </tr>
                             `,
                               )
@@ -1452,12 +1274,12 @@ function handleDashboard(url: URL): Response {
             </div>
         </div>
 
-        <!-- Recent Interactions -->
-        <div class="section">
-            <div class="section-header">💬 Recent Bot Interactions (${serverState.interactionBuffer.length} in buffer)</div>
+        <!-- Recent User Interactions -->
+        <div class="dashboard-section">
+            <div class="section-header">💬 Recent User Interactions (${systemState.interactionBuffer.length} in buffer)</div>
             <div class="section-content">
                 <div style="overflow-x: auto;">
-                    <table class="table">
+                    <table class="data-table">
                         <thead>
                             <tr>
                                 <th>Time</th>
@@ -1469,19 +1291,19 @@ function handleDashboard(url: URL): Response {
                             </tr>
                         </thead>
                         <tbody>
-                            ${serverState.interactionBuffer
+                            ${systemState.interactionBuffer
                               .slice(0, 15)
                               .map(
                                 (interaction) => `
                                 <tr>
                                     <td>${new Date(interaction.timestamp).toLocaleTimeString()}</td>
-                                    <td>@${interaction.botUsername}</td>
+                                    <td>@${interaction.botName}</td>
                                     <td>
-                                        <div>${interaction.user.fullName}</div>
-                                        <small style="color: #718096;">@${interaction.user.username} (${interaction.user.id})</small>
+                                        <div>${interaction.user.name}</div>
+                                        <small style="color: #64748b;">@${interaction.user.username} (${interaction.user.id})</small>
                                     </td>
-                                    <td><span style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">${interaction.chat.type}</span></td>
-                                    <td><span style="background: #bee3f8; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">${interaction.updateType}</span></td>
+                                    <td><span style="background: #e2e8f0; padding: 4px 8px; border-radius: 6px; font-size: 0.8rem;">${interaction.chat.type}</span></td>
+                                    <td><span style="background: #dbeafe; padding: 4px 8px; border-radius: 6px; font-size: 0.8rem;">${interaction.updateType}</span></td>
                                     <td>${interaction.metadata.responseTime.toFixed(2)}ms</td>
                                 </tr>
                             `,
@@ -1494,19 +1316,17 @@ function handleDashboard(url: URL): Response {
         </div>
     </div>
 
-    <button class="refresh-btn" onclick="window.location.reload()" title="Refresh Dashboard">
+    <button class="refresh-button" onclick="window.location.reload()" title="Refresh Dashboard">
         🔄
     </button>
 
     <script>
-        // Auto-refresh every 30 seconds
         setTimeout(() => {
             window.location.reload();
         }, 30000);
         
-        // Add loading indicator
         document.addEventListener('DOMContentLoaded', function() {
-            const refreshBtn = document.querySelector('.refresh-btn');
+            const refreshBtn = document.querySelector('.refresh-button');
             refreshBtn.addEventListener('click', function() {
                 this.innerHTML = '⏳';
                 this.style.transform = 'rotate(360deg)';
@@ -1521,17 +1341,18 @@ function handleDashboard(url: URL): Response {
   })
 }
 
-function handleStatsAPI(): Response {
-  const stats = serverState.getStats()
-  const botHealth = LogBotManager.getBotHealthStatus()
-  const adAnalytics = AdManager.getAdAnalytics()
+// API Stats Handler
+function generateStatsAPI(): Response {
+  const metrics = systemState.getSystemMetrics()
+  const botHealth = LogBotManager.getBotHealthInfo()
+  const campaignAnalytics = CampaignManager.getCampaignAnalytics()
 
   return new Response(
     JSON.stringify({
-      stats,
+      metrics,
       botHealth,
-      adAnalytics,
-      interactionBufferSize: serverState.interactionBuffer.length,
+      campaignAnalytics,
+      interactionBufferSize: systemState.interactionBuffer.length,
       timestamp: new Date().toISOString(),
     }),
     {
@@ -1543,7 +1364,7 @@ function handleStatsAPI(): Response {
   )
 }
 
-// Main Server Implementation
+// Main Server
 serve({
   port: process.env.PORT || 3000,
 
@@ -1553,31 +1374,29 @@ serve({
     const method = req.method
     const pathname = url.pathname
     const userAgent = req.headers.get("user-agent") || "unknown"
-    const clientIP = Utils.getClientIP(req)
+    const clientIP = HelperUtils.extractClientIP(req)
 
-    serverState.incrementConnections()
+    systemState.addConnection()
 
     try {
-      // Rate limiting
-      if (Utils.isRateLimited(clientIP)) {
+      if (HelperUtils.checkRateLimit(clientIP)) {
         return new Response("Rate limit exceeded", {
           status: 429,
           headers: { "Retry-After": "60" },
         })
       }
 
-      // Webhook handler
       if (method === "POST" && pathname.startsWith("/bot/")) {
         const botToken = pathname.split("/bot/")[1]
 
         if (!botToken || !botToken.includes(":")) {
-          Logger.storeRequestLog({
-            token: botToken || "invalid",
+          RequestLogger.saveLog({
+            botToken: botToken || "invalid",
             status: "failed",
             responseTime: performance.now() - startTime,
-            errorReason: "Invalid bot token format",
+            errorMessage: "Invalid bot token format",
             userAgent,
-            ipAddress: clientIP,
+            clientIP,
           })
           return new Response("Invalid bot token format", { status: 400 })
         }
@@ -1585,53 +1404,51 @@ serve({
         try {
           const update = (await req.json()) as TelegramUpdate
 
-          // Process update
-          await processUpdate(update, botToken, userAgent, clientIP, startTime)
+          await processIncomingUpdate(update, botToken, userAgent, clientIP, startTime)
 
-          Logger.storeRequestLog({
-            token: botToken,
+          RequestLogger.saveLog({
+            botToken,
             status: "success",
             responseTime: performance.now() - startTime,
             userAgent,
-            ipAddress: clientIP,
+            clientIP,
           })
 
           return new Response("OK", { status: 200 })
         } catch (error: any) {
-          Logger.storeRequestLog({
-            token: botToken,
+          RequestLogger.saveLog({
+            botToken,
             status: "failed",
             responseTime: performance.now() - startTime,
-            errorReason: error.message,
+            errorMessage: error.message,
             userAgent,
-            ipAddress: clientIP,
+            clientIP,
           })
 
           console.error("❌ Webhook processing error:", error)
-          return new Response("OK", { status: 200 }) // Always return 200 to Telegram
+          return new Response("OK", { status: 200 })
         }
       }
 
-      // Status page routes
       if (method === "GET" && pathname === "/") {
-        return handleStatusPage()
+        return generateStatusPage()
       }
 
       if (method === "GET" && pathname === "/status") {
-        return handleDashboard(url)
+        return generateDashboard(url)
       }
 
       if (method === "GET" && pathname === "/api/stats") {
-        return handleStatsAPI()
+        return generateStatsAPI()
       }
 
       return new Response("Not Found", { status: 404 })
     } finally {
-      serverState.decrementConnections()
+      systemState.removeConnection()
     }
   },
 })
 
 console.log(`🚀 Advanced Telegram Bot Server started on port ${process.env.PORT || 3000}`)
-console.log(`📊 Dashboard available at: /status?pass=${CONFIG.DASHBOARD_PASSWORD}`)
+console.log(`📊 Dashboard available at: /status?pass=${SYSTEM_CONFIG.DASHBOARD_PASSWORD}`)
 console.log(`🔧 API endpoint available at: /api/stats`)
