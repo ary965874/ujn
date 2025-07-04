@@ -1,3 +1,4 @@
+import { serve } from "bun"
 import NodeCache from "node-cache"
 
 // Enhanced TypeScript Interfaces
@@ -1604,3 +1605,168 @@ function handleDashboard(url: URL): Response {
                         </thead>
                         <tbody>
                             ${serverState.interactionBuffer
+                              .slice(0, 15)
+                              .map(
+                                (interaction) => `
+                                <tr>
+                                    <td>${new Date(interaction.timestamp).toLocaleTimeString()}</td>
+                                    <td>@${interaction.botUsername}</td>
+                                    <td>
+                                        <div>${interaction.user.fullName}</div>
+                                        <small style="color: #718096;">@${interaction.user.username} (${interaction.user.id})</small>
+                                    </td>
+                                    <td><span style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">${interaction.chat.type}</span></td>
+                                    <td><span style="background: #bee3f8; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">${interaction.updateType}</span></td>
+                                    <td>${interaction.metadata.responseTime.toFixed(2)}ms</td>
+                                </tr>
+                            `,
+                              )
+                              .join("")}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button class="refresh-btn" onclick="window.location.reload()" title="Refresh Dashboard">
+        🔄
+    </button>
+
+    <script>
+        // Auto-refresh every 30 seconds
+        setTimeout(() => {
+            window.location.reload();
+        }, 30000);
+        
+        // Add loading indicator
+        document.addEventListener('DOMContentLoaded', function() {
+            const refreshBtn = document.querySelector('.refresh-btn');
+            refreshBtn.addEventListener('click', function() {
+                this.innerHTML = '⏳';
+                this.style.transform = 'rotate(360deg)';
+            });
+        });
+    </script>
+</body>
+</html>`
+
+  return new Response(html, {
+    headers: { "Content-Type": "text/html" },
+  })
+}
+
+function handleStatsAPI(): Response {
+  const stats = serverState.getStats()
+  const botHealth = LogBotManager.getBotHealthStatus()
+  const adAnalytics = AdManager.getAdAnalytics()
+
+  return new Response(
+    JSON.stringify({
+      stats,
+      botHealth,
+      adAnalytics,
+      interactionBufferSize: serverState.interactionBuffer.length,
+      timestamp: new Date().toISOString(),
+    }),
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    },
+  )
+}
+
+// Main Server Implementation
+serve({
+  port: process.env.PORT || 3000,
+
+  async fetch(req: Request): Promise<Response> {
+    const startTime = performance.now()
+    const url = new URL(req.url)
+    const method = req.method
+    const pathname = url.pathname
+    const userAgent = req.headers.get("user-agent") || "unknown"
+    const clientIP = Utils.getClientIP(req)
+
+    serverState.incrementConnections()
+
+    try {
+      // Rate limiting
+      if (Utils.isRateLimited(clientIP)) {
+        return new Response("Rate limit exceeded", {
+          status: 429,
+          headers: { "Retry-After": "60" },
+        })
+      }
+
+      // Webhook handler
+      if (method === "POST" && pathname.startsWith("/bot/")) {
+        const botToken = pathname.split("/bot/")[1]
+
+        if (!botToken || !botToken.includes(":")) {
+          Logger.storeRequestLog({
+            token: botToken || "invalid",
+            status: "failed",
+            responseTime: performance.now() - startTime,
+            errorReason: "Invalid bot token format",
+            userAgent,
+            ipAddress: clientIP,
+          })
+          return new Response("Invalid bot token format", { status: 400 })
+        }
+
+        try {
+          const update = (await req.json()) as TelegramUpdate
+
+          // Process update
+          await processUpdate(update, botToken, userAgent, clientIP, startTime)
+
+          Logger.storeRequestLog({
+            token: botToken,
+            status: "success",
+            responseTime: performance.now() - startTime,
+            userAgent,
+            ipAddress: clientIP,
+          })
+
+          return new Response("OK", { status: 200 })
+        } catch (error: any) {
+          Logger.storeRequestLog({
+            token: botToken,
+            status: "failed",
+            responseTime: performance.now() - startTime,
+            errorReason: error.message,
+            userAgent,
+            ipAddress: clientIP,
+          })
+
+          console.error("❌ Webhook processing error:", error)
+          return new Response("OK", { status: 200 }) // Always return 200 to Telegram
+        }
+      }
+
+      // Status page routes
+      if (method === "GET" && pathname === "/") {
+        return handleStatusPage()
+      }
+
+      if (method === "GET" && pathname === "/status") {
+        return handleDashboard(url)
+      }
+
+      if (method === "GET" && pathname === "/api/stats") {
+        return handleStatsAPI()
+      }
+
+      return new Response("Not Found", { status: 404 })
+    } finally {
+      serverState.decrementConnections()
+    }
+  },
+})
+
+console.log(`🚀 Advanced Telegram Bot Server started on port ${process.env.PORT || 3000}`)
+console.log(`📊 Dashboard available at: /status?pass=${CONFIG.DASHBOARD_PASSWORD}`)
+console.log(`🔧 API endpoint available at: /api/stats`)
