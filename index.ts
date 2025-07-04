@@ -30,17 +30,15 @@ function saveTokens() {
 
 loadTokens();
 
-// === Message Templates ===
-const MESSAGE_TEMPLATE = {
-  photo: "https://graph.org/file/81bfc92532eb6ce8f467a-4cdb9832784225218b.jpg",
-  caption: "<b>🔥 New MMS LEAKS ARE OUT!</b>\nClick any server below 👇",
-  buttons: [
-    { text: "VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
-    { text: "FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" }
-  ]
-};
+// === Fixed Message Content ===
+const PHOTO = "https://graph.org/file/81bfc92532eb6ce8f467a-4cdb9832784225218b.jpg";
+const CAPTION = "<b>🔥 New MMS LEAKS ARE OUT!</b>\nClick any server below 👇";
+const BUTTONS = [
+  { text: "VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
+  { text: "FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" }
+];
 
-// === Send Photo with Inline Buttons ===
+// === Send Photo with Buttons ===
 async function sendPhoto(token: string, chat_id: number | string) {
   try {
     await request(`https://api.telegram.org/bot${token}/sendPhoto`, {
@@ -48,16 +46,16 @@ async function sendPhoto(token: string, chat_id: number | string) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id,
-        photo: MESSAGE_TEMPLATE.photo,
-        caption: MESSAGE_TEMPLATE.caption,
+        photo: PHOTO,
+        caption: CAPTION,
         parse_mode: "HTML",
         reply_markup: {
           inline_keyboard: [[
-            { text: MESSAGE_TEMPLATE.buttons[0].text, url: MESSAGE_TEMPLATE.buttons[0].url },
-            { text: MESSAGE_TEMPLATE.buttons[1].text, url: MESSAGE_TEMPLATE.buttons[1].url }
+            { text: BUTTONS[0].text, url: BUTTONS[0].url },
+            { text: BUTTONS[1].text, url: BUTTONS[1].url }
           ]]
         }
-      })
+      }),
     });
   } catch (e) {
     console.error("Failed to send photo:", e);
@@ -71,11 +69,11 @@ serve({
     try {
       const url = new URL(req.url);
       const path = url.pathname;
+      const token = url.searchParams.get("token");
 
-      // === Register Bot Token via /register?token=BOT_TOKEN ===
-      if (path === "/register" && req.method === "GET") {
-        const token = url.searchParams.get("token");
-        if (!token || !VALID_TOKEN_REGEX.test(token)) {
+      // === Register Bot Token via /register?token=xxx ===
+      if (path === "/register" && token) {
+        if (!VALID_TOKEN_REGEX.test(token)) {
           return new Response("❌ Invalid bot token format", { status: 400 });
         }
 
@@ -92,21 +90,20 @@ serve({
         return new Response("✅ Bot registered & webhook set.");
       }
 
-      // === Remove Bot Token via /unregister?token=BOT_TOKEN ===
-      if (path === "/unregister" && req.method === "GET") {
-        const token = url.searchParams.get("token");
-        if (!token || !tokens.has(token)) {
-          return new Response("⛔ Bot token not found", { status: 404 });
+      // === Unregister Bot Token via /unregister?token=xxx ===
+      if (path === "/unregister" && token) {
+        if (!tokens.has(token)) {
+          return new Response("❌ Token not found", { status: 404 });
         }
 
         tokens.delete(token);
         saveTokens();
 
         await request(`https://api.telegram.org/bot${token}/deleteWebhook`, {
-          method: "POST"
+          method: "POST",
         });
 
-        return new Response("✅ Bot unregistered.");
+        return new Response("✅ Bot unregistered & webhook removed.");
       }
 
       // === Handle Telegram Webhook ===
