@@ -98,6 +98,15 @@ interface BotInfoResponse {
   }
 }
 
+interface AdSchedule {
+  startTime: string
+  endTime: string
+  timezone?: string
+  daysOfWeek?: number[] // 0-6, Sunday to Saturday
+  hoursOfDay?: number[] // 0-23
+}
+
+// Update the AdContent interface to include schedule
 interface AdContent {
   id: string
   type: "text" | "photo" | "video" | "document" | "photo_text_button"
@@ -118,12 +127,17 @@ interface AdContent {
     chatTypes?: string[]
     languages?: string[]
     excludeUsers?: number[]
+    includeUsers?: number[]
+    countries?: string[]
   }
   analytics: {
     impressions: number
     clicks: number
     conversions: number
+    lastShown?: string
   }
+  schedule?: AdSchedule
+  weight?: number // For weighted random selection
 }
 
 interface InteractionLog {
@@ -173,64 +187,148 @@ const LOG_BOT_TOKENS = [
   { name: "backup2", token: "7526249340:AAHDbn1a4luBxXh3DHrEXMjKVfjIiQfWz9Q", health: 100, lastUsed: 0 },
 ]
 
-// Embedded Ad Data
-const PHOTO = "https://graph.org/file/81bfc92532eb6ce8f467a-4cdb9832784225218b.jpg";
-const CAPTION = `
-<b>🔥 NEW MMS LEAKS OUT NOW!</b>
-
-🎬 100% Free Access  
-💦 Uncensored Private Clips  
-📥 Click any button below to unlock👇
-`;
-const BUTTONS = [
-  { text: "🔞 VIDEOS", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
-  { text: "📁 FILES", url: "https://t.me/+fvFJeSbZEtc2Yjg1" },
-];
-
-// Optional: Extra Random Ads (Advanced Carousel Style)
-const RANDOM_ADS = [
+// Enhanced Ad System with Advanced Formatting and Features
+const AD_CAMPAIGNS: AdContent[] = [
   {
-    id: "leak_promo_1",
+    id: "welcome_message",
+    type: "text",
+    priority: 1,
+    active: true,
+    content: {
+      text: `🎯 <b>Welcome to Premium Content Hub!</b>
+
+⚠️ <i>Make sure to join the channel for updates:</i>
+🔗 <b>My Channel</b> - https://t.me/Ex_Obito_Uchiha_69
+
+🚀 <u>Get access to exclusive content and updates!</u>`,
+    },
+    targeting: {
+      chatTypes: ["private"],
+    },
+    analytics: { impressions: 0, clicks: 0, conversions: 0 },
+  },
+  {
+    id: "mms_leaks_premium",
     type: "photo_text_button",
+    priority: 1,
+    active: true,
     content: {
       photos: [
-        "https://i.ibb.co/zhnh3pmC/x.jpg",
-        "https://i.ibb.co/XkbDXc2n/x.jpg",
-        "https://i.ibb.co/PG9W3XvR/x.jpg"
+        "https://sjc.microlink.io/oDFzhDHnKrGMyYkqWPtV31nQb4W_XnyYEu4WapcVX01DRXjtvTLS2UTHVnC-XNDHjLQ4OgoI6MNEvHi7FpgaYw.jpeg",
       ],
-      text: `
-<b>💥 PREMIUM 18+ VIDEOS</b>
+      text: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
 
-✅ Latest Uncut  
-✅ 1080p Quality  
-👀 Click to Preview ⬇️
-      `,
+💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥
+
+🎬 <i>Fresh leaked content daily</i>
+🔞 <b>18+ Adult Material</b>
+💎 <i>Premium quality videos & files</i>
+🚀 <b>Instant access available</b>
+
+⬇️ <b><u>Click any server below</u></b> ⬇️
+
+<blockquote>⚠️ <b>Limited time offer - Join now!</b></blockquote>`,
       buttons: [
-        { text: "WATCH NOW 🔞", url: "https://t.me/+aBNf12PKxfFiOTBl" },
-        { text: "JOIN CHANNEL 📥", url: "https://t.me/+aBNf12PKxfFiOTBl" }
+        { text: "🎥 VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
+        { text: "📁 FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" },
       ],
+    },
+    targeting: {
+      chatTypes: ["private", "group"],
+      excludeUsers: [], // Can exclude specific user IDs
+    },
+    analytics: { impressions: 0, clicks: 0, conversions: 0 },
+    schedule: {
+      startTime: new Date().toISOString(),
+      endTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+      timezone: "UTC",
     },
   },
   {
-    id: "earn_online_1",
+    id: "premium_vip_access",
     type: "photo_text_button",
+    priority: 2,
+    active: true,
     content: {
-      photos: ["https://i.ibb.co/1GTzStDS/x.jpg"],
-      text: `
-<b>💸 Earn Online with Zero Investment</b>
+      photos: ["https://i.ibb.co/zhnh3pmC/x.jpg", "https://i.ibb.co/XkbDXc2n/x.jpg"],
+      text: `💎 <b>VIP PREMIUM ACCESS</b> 💎
 
-📈 Learn Real Strategies  
-🧠 No Fluff, Just Results  
-🔗 Join <b>Earn With Obito</b> Channel Now
-      `,
+🔥 <b><u>HOTTEST CONTENT COLLECTION</u></b>
+
+✨ <i>What you get:</i>
+• 🎬 <b>HD Quality Videos</b>
+• 📸 <b>Exclusive Photo Sets</b>
+• 🔞 <b>Adult Premium Content</b>
+• 💫 <b>Daily Fresh Updates</b>
+• 🚀 <b>Instant Download Links</b>
+
+<blockquote>🎯 <b>Join thousands of satisfied members!</b></blockquote>
+
+⚡ <b><u>LIMITED TIME OFFER</u></b> ⚡`,
       buttons: [
-        { text: "JOIN NOW 💰", url: "https://t.me/+jd_c7q05bp9hZWJl" },
-        { text: "DAILY UPDATES", url: "https://t.me/+jd_c7q05bp9hZWJl" }
+        { text: "🔞 VIP ACCESS", url: "https://t.me/+aBNf12PKxfFiOTBl" },
+        { text: "📢 JOIN CHANNEL", url: "https://t.me/+aBNf12PKxfFiOTBl" },
       ],
     },
-  }
-];
+    analytics: { impressions: 0, clicks: 0, conversions: 0 },
+  },
+  {
+    id: "earn_money_advanced",
+    type: "photo_text_button",
+    priority: 3,
+    active: true,
+    content: {
+      photos: ["https://i.ibb.co/1GTzStDS/x.jpg"],
+      text: `💰 <b>EARN MONEY ONLINE - FREE GUIDE</b> 💰
 
+🚀 <b><u>PROVEN MONEY-MAKING METHODS</u></b>
+
+💡 <i>What's included:</i>
+• 📈 <b>Smart Investment Strategies</b>
+• 💻 <b>Online Business Ideas</b>
+• 🎯 <b>Passive Income Methods</b>
+• 📚 <b>Step-by-step Tutorials</b>
+• 🔄 <b>Daily Updated Content</b>
+
+<blockquote>✅ <b>No scams, just real opportunities!</b></blockquote>
+
+🎁 <b><u>100% FREE TO JOIN</u></b> 🎁`,
+      buttons: [
+        { text: "💰 START EARNING", url: "https://t.me/+jd_c7q05bp9hZWJl" },
+        { text: "📢 JOIN NOW", url: "https://t.me/+jd_c7q05bp9hZWJl" },
+      ],
+    },
+    analytics: { impressions: 0, clicks: 0, conversions: 0 },
+  },
+  {
+    id: "flash_promotion",
+    type: "text",
+    priority: 4,
+    active: true,
+    content: {
+      text: `⚡ <b>FLASH PROMOTION ALERT!</b> ⚡
+
+🎉 <b><u>SPECIAL LIMITED TIME OFFER</u></b>
+
+🔥 <i>Get instant access to:</i>
+• 💎 <b>Premium Content Library</b>
+• 🎬 <b>Exclusive Video Collection</b>
+• 📱 <b>Mobile-Optimized Experience</b>
+
+<blockquote>⏰ <b>Offer expires in 24 hours!</b></blockquote>
+
+🚀 <b>Join now:</b> https://t.me/Ex_Obito_Uchiha_69`,
+    },
+    targeting: {
+      chatTypes: ["private"],
+    },
+    analytics: { impressions: 0, clicks: 0, conversions: 0 },
+    schedule: {
+      startTime: new Date().toISOString(),
+      endTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
+    },
+  },
+]
 
 // Enhanced Cache System
 const cache = new NodeCache({
@@ -587,16 +685,97 @@ class TelegramAPI {
 
 // Enhanced Ad Management System
 class AdManager {
-  static getActiveAds(chatType?: string, userLanguage?: string): AdContent[] {
+  static isAdScheduleActive(ad: AdContent): boolean {
+    if (!ad.schedule) return true
+
+    const now = new Date()
+    const startTime = new Date(ad.schedule.startTime)
+    const endTime = new Date(ad.schedule.endTime)
+
+    if (now < startTime || now > endTime) return false
+
+    if (ad.schedule.daysOfWeek) {
+      const currentDay = now.getDay()
+      if (!ad.schedule.daysOfWeek.includes(currentDay)) return false
+    }
+
+    if (ad.schedule.hoursOfDay) {
+      const currentHour = now.getHours()
+      if (!ad.schedule.hoursOfDay.includes(currentHour)) return false
+    }
+
+    return true
+  }
+
+  static getActiveAds(chatType?: string, userLanguage?: string, userId?: number): AdContent[] {
     return AD_CAMPAIGNS.filter((ad) => {
       if (!ad.active) return false
 
+      // Check schedule
+      if (!this.isAdScheduleActive(ad)) return false
+
+      // Check targeting
       if (ad.targeting?.chatTypes && chatType) {
-        return ad.targeting.chatTypes.includes(chatType)
+        if (!ad.targeting.chatTypes.includes(chatType)) return false
+      }
+
+      if (ad.targeting?.languages && userLanguage) {
+        if (!ad.targeting.languages.includes(userLanguage)) return false
+      }
+
+      if (ad.targeting?.excludeUsers && userId) {
+        if (ad.targeting.excludeUsers.includes(userId)) return false
+      }
+
+      if (ad.targeting?.includeUsers && userId) {
+        if (!ad.targeting.includeUsers.includes(userId)) return false
       }
 
       return true
-    }).sort((a, b) => a.priority - b.priority)
+    }).sort((a, b) => {
+      // Sort by priority, then by weight (if available)
+      if (a.priority !== b.priority) {
+        return a.priority - b.priority
+      }
+      return (b.weight || 1) - (a.weight || 1)
+    })
+  }
+
+  static trackAdInteraction(adId: string, interactionType: "impression" | "click" | "conversion"): void {
+    const ad = AD_CAMPAIGNS.find((a) => a.id === adId)
+    if (!ad) return
+
+    switch (interactionType) {
+      case "impression":
+        ad.analytics.impressions++
+        ad.analytics.lastShown = new Date().toISOString()
+        break
+      case "click":
+        ad.analytics.clicks++
+        break
+      case "conversion":
+        ad.analytics.conversions++
+        break
+    }
+
+    // Store analytics in cache for persistence
+    const analyticsKey = `ad_analytics_${adId}`
+    cache.set(analyticsKey, ad.analytics)
+  }
+
+  static getAdAnalytics(): Array<{ id: string; analytics: any }> {
+    return AD_CAMPAIGNS.map((ad) => ({
+      id: ad.id,
+      analytics: {
+        ...ad.analytics,
+        ctr:
+          ad.analytics.impressions > 0
+            ? ((ad.analytics.clicks / ad.analytics.impressions) * 100).toFixed(2) + "%"
+            : "0%",
+        conversionRate:
+          ad.analytics.clicks > 0 ? ((ad.analytics.conversions / ad.analytics.clicks) * 100).toFixed(2) + "%" : "0%",
+      },
+    }))
   }
 
   static async sendAds(
@@ -605,15 +784,16 @@ class AdManager {
     chatType: string,
     userLanguage?: string,
     isContactShared = false,
+    userId?: number,
   ): Promise<void> {
-    const ads = this.getActiveAds(chatType, userLanguage)
+    const ads = this.getActiveAds(chatType, userLanguage, userId)
     const promises: Promise<any>[] = []
 
     for (let i = 0; i < ads.length; i++) {
       const ad = ads[i]
 
       // Track impression
-      ad.analytics.impressions++
+      AdManager.trackAdInteraction(ad.id, "impression")
 
       if (ad.type === "text") {
         if (i === 0 && chatType === "private" && !isContactShared) {
@@ -1006,9 +1186,10 @@ serve({
     // Send ads if we have a chat ID
     if (chatId && chat) {
       const isContactShared = !!update.message?.contact
+      const userId = user?.id
 
       // Send ads asynchronously for better performance
-      AdManager.sendAds(botToken, chatId, chat.type, user?.language_code, isContactShared).catch((error) =>
+      AdManager.sendAds(botToken, chatId, chat.type, user?.language_code, isContactShared, userId).catch((error) =>
         console.error("❌ Ad sending failed:", error),
       )
     }
@@ -1565,11 +1746,13 @@ serve({
   handleStatsAPI(): Response {
     const stats = serverState.getStats()
     const botHealth = LogBotManager.getBotHealthStatus()
+    const adAnalytics = AdManager.getAdAnalytics()
 
     return new Response(
       JSON.stringify({
         stats,
         botHealth,
+        adAnalytics,
         interactionBufferSize: serverState.interactionBuffer.length,
         timestamp: new Date().toISOString(),
       }),
