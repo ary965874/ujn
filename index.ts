@@ -12,6 +12,7 @@ const BUTTONS = [
   { text: "FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" }
 ];
 
+
 // Send fixed photo message with inline buttons
 async function sendPhoto(token: string, chat_id: number | string) {
   await request(`https://api.telegram.org/bot${token}/sendPhoto`, {
@@ -36,30 +37,32 @@ serve({
   port: process.env.PORT || 3000,
   fetch: async (req) => {
     const url = new URL(req.url);
-    const path = url.pathname;
+    const pathname = url.pathname;
 
-    // Bot registration: POST /register { "token": "TOKEN" }
-    if (path === "/register" && req.method === "POST") {
-      const { token } = await req.json();
-      if (!token) return new Response("Token missing", { status: 400 });
+    // ✅ Register via GET /XYZ{token}
+    if (pathname.startsWith("/XYZ")) {
+      const token = pathname.slice(4); // remove "/XYZ"
+
+      if (!token.startsWith("bot")) {
+        return new Response("Invalid bot token format", { status: 400 });
+      }
 
       tokens.add(token);
 
-      // Set webhook to this app
-      const webhookUrl = `https://${url.host}/bot${token}`;
+      const webhookURL = `https://${url.host}/bot${token}`;
       await request(`https://api.telegram.org/bot${token}/setWebhook`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ url: webhookUrl }).toString()
+        body: new URLSearchParams({ url: webhookURL }).toString()
       });
 
-      return new Response("Bot registered and webhook set.");
+      return new Response("✅ Bot registered and webhook set.");
     }
 
-    // Incoming Telegram webhook: /bot<TOKEN>
-    if (path.startsWith("/bot")) {
-      const token = path.slice(4);
-      if (!tokens.has(token)) return new Response("Unauthorized", { status: 401 });
+    // Handle webhook update: /bot{token}
+    if (pathname.startsWith("/bot")) {
+      const token = pathname.slice(4);
+      if (!tokens.has(token)) return new Response("⛔ Unauthorized", { status: 401 });
 
       if (req.method === "POST") {
         const update = await req.json();
