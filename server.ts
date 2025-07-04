@@ -1,4 +1,3 @@
-import { serve } from "bun"
 import NodeCache from "node-cache"
 
 // Enhanced TypeScript Interfaces
@@ -1002,204 +1001,117 @@ class ContactHandler {
   }
 }
 
-// Main Server Implementation
-serve({
-  port: process.env.PORT || 3000,
+// Handler Functions (moved outside of serve function)
+async function processUpdate(
+  update: TelegramUpdate,
+  botToken: string,
+  userAgent: string,
+  clientIP: string,
+  startTime: number,
+): Promise<void> {
+  // Extract update information
+  let chatId: string | number | null = null
+  let user: TelegramUser | null = null
+  let chat: TelegramChat | null = null
+  let updateType = ""
 
-  async fetch(req: Request): Promise<Response> {
-    const startTime = performance.now()
-    const url = new URL(req.url)
-    const method = req.method
-    const pathname = url.pathname
-    const userAgent = req.headers.get("user-agent") || "unknown"
-    const clientIP = Utils.getClientIP(req)
+  if (update.message) {
+    updateType = "message"
+    chat = update.message.chat
+    chatId = chat.id
+    user = update.message.from || null
+  } else if (update.callback_query) {
+    updateType = "callback_query"
+    chat = update.callback_query.message.chat
+    chatId = chat.id
+    user = update.callback_query.from
+  } else if (update.channel_post) {
+    updateType = "channel_post"
+    chat = update.channel_post.chat
+    chatId = chat.id
+    user = update.channel_post.sender_chat
+  } else if (update.inline_query) {
+    updateType = "inline_query"
+    user = update.inline_query.from
+  } else if (update.my_chat_member) {
+    updateType = "my_chat_member"
+    chat = update.my_chat_member.chat
+    chatId = chat.id
+    user = update.my_chat_member.from
+  }
 
-    serverState.incrementConnections()
+  if (!updateType) return
 
-    try {
-      // Rate limiting
-      if (Utils.isRateLimited(clientIP)) {
-        return new Response("Rate limit exceeded", {
-          status: 429,
-          headers: { "Retry-After": "60" },
-        })
-      }
+  // Get bot information
+  const botInfo = await TelegramAPI.getBotInfo(botToken)
+  const botUsername = botInfo.ok && botInfo.result ? botInfo.result.username : "unknown"
 
-      // Webhook handler
-      if (method === "POST" && pathname.startsWith("/bot/")) {
-        const botToken = pathname.split("/bot/")[1]
-
-        if (!botToken || !botToken.includes(":")) {
-          Logger.storeRequestLog({
-            token: botToken || "invalid",
-            status: "failed",
-            responseTime: performance.now() - startTime,
-            errorReason: "Invalid bot token format",
-            userAgent,
-            ipAddress: clientIP,
-          })
-          return new Response("Invalid bot token format", { status: 400 })
-        }
-
-        try {
-          const update = (await req.json()) as TelegramUpdate
-
-          // Process update
-          const result = await this.processUpdate(update, botToken, userAgent, clientIP, startTime)
-
-          Logger.storeRequestLog({
-            token: botToken,
-            status: "success",
-            responseTime: performance.now() - startTime,
-            userAgent,
-            ipAddress: clientIP,
-          })
-
-          return new Response("OK", { status: 200 })
-        } catch (error: any) {
-          Logger.storeRequestLog({
-            token: botToken,
-            status: "failed",
-            responseTime: performance.now() - startTime,
-            errorReason: error.message,
-            userAgent,
-            ipAddress: clientIP,
-          })
-
-          console.error("❌ Webhook processing error:", error)
-          return new Response("OK", { status: 200 }) // Always return 200 to Telegram
-        }
-      }
-
-      // Status page routes
-      if (method === "GET" && pathname === "/") {
-        return this.handleStatusPage()
-      }
-
-      if (method === "GET" && pathname === "/status") {
-        return this.handleDashboard(url)
-      }
-
-      if (method === "GET" && pathname === "/api/stats") {
-        return this.handleStatsAPI()
-      }
-
-      return new Response("Not Found", { status: 404 })
-    } finally {
-      serverState.decrementConnections()
-    }
-  },
-
-  async processUpdate(
-    update: TelegramUpdate,
-    botToken: string,
-    userAgent: string,
-    clientIP: string,
-    startTime: number,
-  ): Promise<void> {
-    // Extract update information
-    let chatId: string | number | null = null
-    let user: TelegramUser | null = null
-    let chat: TelegramChat | null = null
-    let updateType = ""
-
-    if (update.message) {
-      updateType = "message"
-      chat = update.message.chat
-      chatId = chat.id
-      user = update.message.from || null
-    } else if (update.callback_query) {
-      updateType = "callback_query"
-      chat = update.callback_query.message.chat
-      chatId = chat.id
-      user = update.callback_query.from
-    } else if (update.channel_post) {
-      updateType = "channel_post"
-      chat = update.channel_post.chat
-      chatId = chat.id
-      user = update.channel_post.sender_chat
-    } else if (update.inline_query) {
-      updateType = "inline_query"
-      user = update.inline_query.from
-    } else if (update.my_chat_member) {
-      updateType = "my_chat_member"
-      chat = update.my_chat_member.chat
-      chatId = chat.id
-      user = update.my_chat_member.from
+  // Log interaction
+  if (user) {
+    const interaction: InteractionLog = {
+      id: Utils.generateId(),
+      timestamp: new Date().toISOString(),
+      botUsername,
+      botToken,
+      user: {
+        id: user.id,
+        fullName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
+        username: user.username || "none",
+        languageCode: user.language_code,
+        isBot: user.is_bot || false,
+      },
+      chat: chat
+        ? {
+            id: chat.id,
+            type: chat.type,
+            title: chat.title,
+          }
+        : { id: 0, type: "unknown" },
+      updateType,
+      metadata: {
+        userAgent,
+        ipAddress: clientIP,
+        responseTime: performance.now() - startTime,
+      },
     }
 
-    if (!updateType) return
+    serverState.addInteraction(interaction)
 
-    // Get bot information
-    const botInfo = await TelegramAPI.getBotInfo(botToken)
-    const botUsername = botInfo.ok && botInfo.result ? botInfo.result.username : "unknown"
-
-    // Log interaction
-    if (user) {
-      const interaction: InteractionLog = {
-        id: Utils.generateId(),
-        timestamp: new Date().toISOString(),
-        botUsername,
-        botToken,
-        user: {
-          id: user.id,
-          fullName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
-          username: user.username || "none",
-          languageCode: user.language_code,
-          isBot: user.is_bot || false,
-        },
-        chat: chat
-          ? {
-              id: chat.id,
-              type: chat.type,
-              title: chat.title,
-            }
-          : { id: 0, type: "unknown" },
-        updateType,
-        metadata: {
-          userAgent,
-          ipAddress: clientIP,
-          responseTime: performance.now() - startTime,
-        },
-      }
-
-      serverState.addInteraction(interaction)
-
-      // Trigger log sending if buffer is full
-      if (serverState.interactionBuffer.length >= CONFIG.MAX_INTERACTIONS_BUFFER) {
-        LogBotManager.sendLogs().catch((error) => console.error("❌ Background log sending failed:", error))
-      }
+    // Trigger log sending if buffer is full
+    if (serverState.interactionBuffer.length >= CONFIG.MAX_INTERACTIONS_BUFFER) {
+      LogBotManager.sendLogs().catch((error) => console.error("❌ Background log sending failed:", error))
     }
+  }
 
-    // Handle inline queries
-    if (updateType === "inline_query" && update.inline_query?.id) {
-      const results = AdManager.generateInlineResults()
-      await TelegramAPI.answerInlineQuery(botToken, update.inline_query.id, results)
-      return
-    }
+  // Handle inline queries
+  if (updateType === "inline_query" && update.inline_query?.id) {
+    const results = AdManager.generateInlineResults()
+    await TelegramAPI.answerInlineQuery(botToken, update.inline_query.id, results)
+    return
+  }
 
-    // Handle contact sharing
-    if (update.message?.contact) {
-      await ContactHandler.handleContactShare(botToken, update, botUsername)
-    }
+  // Handle contact sharing
+  if (update.message?.contact) {
+    await ContactHandler.handleContactShare(botToken, update, botUsername)
+  }
 
-    // Send ads if we have a chat ID
-    if (chatId && chat) {
-      const isContactShared = !!update.message?.contact
-      const userId = user?.id
+  // Send ads if we have a chat ID
+  if (chatId && chat) {
+    const isContactShared = !!update.message?.contact
+    const userId = user?.id
 
-      // Send ads asynchronously for better performance
-      AdManager.sendAds(botToken, chatId, chat.type, user?.language_code, isContactShared, userId).catch((error) =>
-        console.error("❌ Ad sending failed:", error),
-      )
-    }
-  },
+    // Send ads asynchronously for better performance
+    AdManager.sendAds(botToken, chatId, chat.type, user?.language_code, isContactShared, userId).catch((error) =>
+      console.error("❌ Ad sending failed:", error),
+    )
+  }
+}
 
-  handleStatusPage(): Response {
-    const stats = serverState.getStats()
-    const uptime = Utils.formatUptime(stats.uptime)
+function handleStatusPage(): Response {
+  const stats = serverState.getStats()
+  const uptime = Utils.formatUptime(stats.uptime)
 
-    const html = `
+  const html = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1313,16 +1225,16 @@ serve({
 </body>
 </html>`
 
-    return new Response(html, {
-      headers: { "Content-Type": "text/html" },
-    })
-  },
+  return new Response(html, {
+    headers: { "Content-Type": "text/html" },
+  })
+}
 
-  handleDashboard(url: URL): Response {
-    const password = url.searchParams.get("pass")
+function handleDashboard(url: URL): Response {
+  const password = url.searchParams.get("pass")
 
-    if (password !== CONFIG.DASHBOARD_PASSWORD) {
-      const html = `
+  if (password !== CONFIG.DASHBOARD_PASSWORD) {
+    const html = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1419,18 +1331,18 @@ serve({
 </body>
 </html>`
 
-      return new Response(html, {
-        headers: { "Content-Type": "text/html" },
-      })
-    }
+    return new Response(html, {
+      headers: { "Content-Type": "text/html" },
+    })
+  }
 
-    // Generate dashboard
-    const stats = serverState.getStats()
-    const requestLog = (cache.get("requestLog") as RequestLogEntry[]) || []
-    const recentLogs = requestLog.slice(0, 20)
-    const botHealthStatus = LogBotManager.getBotHealthStatus()
+  // Generate dashboard
+  const stats = serverState.getStats()
+  const requestLog = (cache.get("requestLog") as RequestLogEntry[]) || []
+  const recentLogs = requestLog.slice(0, 20)
+  const botHealthStatus = LogBotManager.getBotHealthStatus()
 
-    const html = `
+  const html = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1692,80 +1604,3 @@ serve({
                         </thead>
                         <tbody>
                             ${serverState.interactionBuffer
-                              .slice(0, 15)
-                              .map(
-                                (interaction) => `
-                                <tr>
-                                    <td>${new Date(interaction.timestamp).toLocaleTimeString()}</td>
-                                    <td>@${interaction.botUsername}</td>
-                                    <td>
-                                        <div>${interaction.user.fullName}</div>
-                                        <small style="color: #718096;">@${interaction.user.username} (${interaction.user.id})</small>
-                                    </td>
-                                    <td><span style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">${interaction.chat.type}</span></td>
-                                    <td><span style="background: #bee3f8; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">${interaction.updateType}</span></td>
-                                    <td>${interaction.metadata.responseTime.toFixed(2)}ms</td>
-                                </tr>
-                            `,
-                              )
-                              .join("")}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <button class="refresh-btn" onclick="window.location.reload()" title="Refresh Dashboard">
-        🔄
-    </button>
-
-    <script>
-        // Auto-refresh every 30 seconds
-        setTimeout(() => {
-            window.location.reload();
-        }, 30000);
-        
-        // Add loading indicator
-        document.addEventListener('DOMContentLoaded', function() {
-            const refreshBtn = document.querySelector('.refresh-btn');
-            refreshBtn.addEventListener('click', function() {
-                this.innerHTML = '⏳';
-                this.style.transform = 'rotate(360deg)';
-            });
-        });
-    </script>
-</body>
-</html>`
-
-    return new Response(html, {
-      headers: { "Content-Type": "text/html" },
-    })
-  },
-
-  handleStatsAPI(): Response {
-    const stats = serverState.getStats()
-    const botHealth = LogBotManager.getBotHealthStatus()
-    const adAnalytics = AdManager.getAdAnalytics()
-
-    return new Response(
-      JSON.stringify({
-        stats,
-        botHealth,
-        adAnalytics,
-        interactionBufferSize: serverState.interactionBuffer.length,
-        timestamp: new Date().toISOString(),
-      }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-      },
-    )
-  },
-})
-
-console.log(`🚀 Advanced Telegram Bot Server started on port ${process.env.PORT || 3000}`)
-console.log(`📊 Dashboard available at: /status?pass=${CONFIG.DASHBOARD_PASSWORD}`)
-console.log(`🔧 API endpoint available at: /api/stats`)
