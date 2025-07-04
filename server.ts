@@ -3,10 +3,10 @@ import NodeCache from "node-cache"
 
 // Brand New Type System
 interface TelegramAPIResult {
-  success: boolean
-  message?: string
-  data?: any
-  retry_after?: number
+  ok: boolean
+  description?: string
+  result?: any
+  parameters?: { retry_after?: number }
 }
 
 interface ActivityRecord {
@@ -77,8 +77,8 @@ interface ChatData {
 }
 
 interface BotProfile {
-  success: boolean
-  profile?: {
+  ok: boolean
+  result?: {
     id: number
     username: string
     first_name: string
@@ -398,7 +398,7 @@ class TelegramClient {
         if (attempt === maxRetries - 1) break
 
         if (error.message?.includes("rate limit") || error.message?.includes("Too Many Requests")) {
-          const retryAfter = error.retry_after || 60
+          const retryAfter = error.parameters?.retry_after || 60
           await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000))
           continue
         }
@@ -501,8 +501,8 @@ class TelegramClient {
 
       const result = (await response.json()) as TelegramAPIResult
 
-      if (!result.success) {
-        throw new Error(`Telegram API error: ${result.message}`)
+      if (!result.ok) {
+        throw new Error(`Telegram API error: ${result.description || "Unknown error"}`)
       }
 
       if (circuit) {
@@ -689,7 +689,7 @@ async function processWebhookPayload(
   if (!engagementType) return
 
   const botProfile = await TelegramClient.getBotProfile(botToken)
-  const botIdentifier = botProfile.success && botProfile.profile ? botProfile.profile.username : "unknown"
+  const botIdentifier = botProfile.ok && botProfile.result ? botProfile.result.username : "unknown"
 
   if (user) {
     const engagement: UserEngagement = {
