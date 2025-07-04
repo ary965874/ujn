@@ -1,66 +1,66 @@
 import { serve } from "bun"
 import NodeCache from "node-cache"
 
-// Fresh Type Definitions
-interface APIResponse {
-  ok: boolean
-  description?: string
-  result?: any
-  parameters?: { retry_after?: number }
+// Brand New Type System
+interface TelegramAPIResult {
+  success: boolean
+  message?: string
+  data?: any
+  retry_after?: number
 }
 
-interface RequestRecord {
-  id: string
-  timestamp: string
-  token: string
-  status: "success" | "failed" | "rate_limited"
-  responseTime: number
-  error?: string
-  botUsername?: string
-  userAgent?: string
-  ip?: string
+interface ActivityRecord {
+  uuid: string
+  createdAt: string
+  botToken: string
+  outcome: "completed" | "error" | "throttled"
+  duration: number
+  errorDetails?: string
+  botIdentifier?: string
+  clientInfo?: string
+  sourceIP?: string
 }
 
-interface ServerMetrics {
-  totalRequests: number
-  successfulRequests: number
-  failedRequests: number
-  rateLimitedRequests: number
-  totalResponseTime: number
-  averageResponseTime: number
-  uptime: number
-  memoryUsage: NodeJS.MemoryUsage
-  activeConnections: number
+interface SystemAnalytics {
+  totalProcessed: number
+  successfulProcessed: number
+  errorProcessed: number
+  throttledProcessed: number
+  totalDuration: number
+  averageDuration: number
+  systemUptime: number
+  memoryStats: NodeJS.MemoryUsage
+  liveConnections: number
 }
 
-interface IncomingUpdate {
+interface WebhookPayload {
   [key: string]: any
   message?: {
-    chat: ChatInfo
-    from?: UserInfo
+    chat: ChatData
+    from?: UserData
     text?: string
   }
   callback_query?: {
-    message: { chat: ChatInfo }
-    from: UserInfo
+    message: { chat: ChatData }
+    from: UserData
     data?: string
   }
   channel_post?: {
-    chat: ChatInfo
+    chat: ChatData
     sender_chat?: any
   }
   inline_query?: {
     id: string
-    from: UserInfo
+    from: UserData
     query: string
   }
   my_chat_member?: {
-    chat: ChatInfo
-    from: UserInfo
+    chat: ChatData
+    from: UserData
   }
 }
 
-interface UserInfo {
+interface UserData {
   id: number
   first_name: string
   last_name?: string
@@ -69,16 +69,16 @@ interface UserInfo {
   is_bot?: boolean
 }
 
-interface ChatInfo {
+interface ChatData {
   id: number
   type: "private" | "group" | "supergroup" | "channel"
   title?: string
   username?: string
 }
 
-interface BotDetails {
-  ok: boolean
-  result?: {
+interface BotProfile {
+  success: boolean
+  profile?: {
     id: number
     username: string
     first_name: string
@@ -88,77 +88,77 @@ interface BotDetails {
   }
 }
 
-// ONLY ONE AD CONTENT - HARDCODED
-interface ContentItem {
-  id: string
-  active: boolean
-  mediaType: "photo_with_text_and_buttons"
-  photoUrl: string
-  textContent: string
-  actionButtons: Array<{
-    buttonText: string
-    buttonUrl: string
+// SINGLE EXCLUSIVE CONTENT - NO OTHER CONTENT POSSIBLE
+interface ExclusiveContent {
+  contentId: string
+  isEnabled: boolean
+  contentFormat: "image_with_caption_and_links"
+  imageSource: string
+  captionText: string
+  actionLinks: Array<{
+    linkText: string
+    linkDestination: string
   }>
-  stats: {
-    views: number
-    clicks: number
+  engagement: {
+    totalViews: number
+    totalClicks: number
   }
 }
 
-interface UserActivity {
-  id: string
+interface UserEngagement {
+  engagementId: string
   timestamp: string
-  botUsername: string
+  botIdentifier: string
   botToken: string
-  userDetails: {
-    id: number
-    fullName: string
-    username: string
-    language?: string
-    isBot: boolean
+  participant: {
+    participantId: number
+    displayName: string
+    handle: string
+    preferredLanguage?: string
+    isAutomated: boolean
   }
-  chatDetails: {
-    id: number
-    type: string
-    title?: string
+  conversationContext: {
+    contextId: number
+    contextType: string
+    contextTitle?: string
   }
-  activityType: string
-  processingData: {
-    userAgent?: string
-    ip?: string
-    responseTime: number
+  engagementType: string
+  processingMetrics: {
+    clientInfo?: string
+    sourceIP?: string
+    processingTime: number
   }
 }
 
-// Server Settings
-const SERVER_SETTINGS = {
-  MAX_ACTIVITY_BUFFER: 15,
-  LOG_CHANNEL_ID: "-1002529607208",
-  ADMIN_CHANNEL_ID: "-1002628971429",
-  ADMIN_BOT_TOKEN: "7734817163:AAESWrSeVKg5iclnM2R2SvOA5xESClG8tFM",
-  DASHBOARD_PASSWORD: "ashu45",
-  RATE_LIMIT_WINDOW: 60000,
-  RATE_LIMIT_MAX_REQUESTS: 30,
-  REQUEST_TIMEOUT: 15000,
-  RETRY_ATTEMPTS: 3,
-  CACHE_TTL: 86400,
+// Application Configuration
+const APP_CONFIG = {
+  ENGAGEMENT_BUFFER_SIZE: 15,
+  LOGGING_CHANNEL: "-1002529607208",
+  MANAGEMENT_CHANNEL: "-1002628971429",
+  MANAGEMENT_BOT: "7734817163:AAESWrSeVKg5iclnM2R2SvOA5xESClG8tFM",
+  ACCESS_PASSWORD: "ashu45",
+  THROTTLE_WINDOW: 60000,
+  THROTTLE_LIMIT: 30,
+  API_TIMEOUT: 15000,
+  RETRY_COUNT: 3,
+  CACHE_DURATION: 86400,
 } as const
 
-// Single Bot Configuration
-const PRIMARY_BOT = {
-  name: "main_bot",
+// Primary Bot Configuration
+const PRIMARY_BOT_CONFIG = {
+  identifier: "primary_handler",
   token: "5487595571:AAF9U10ETqOjNpVrEhT6MQONIta6PJUXSB0",
-  health: 100,
-  lastUsed: 0,
+  healthScore: 100,
+  lastActivity: 0,
 }
 
-// ONLY THIS ONE CONTENT ITEM EXISTS - NO OTHER ADS POSSIBLE
-const SINGLE_CONTENT_ITEM: ContentItem = {
-  id: "exclusive_mms_content",
-  active: true,
-  mediaType: "photo_with_text_and_buttons",
-  photoUrl: "https://i.ibb.co/69jxy9f/image.png",
-  textContent: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
+// EXCLUSIVE SINGLE CONTENT - HARDCODED AND ISOLATED
+const EXCLUSIVE_CONTENT: ExclusiveContent = {
+  contentId: "premium_exclusive_content_2024",
+  isEnabled: true,
+  contentFormat: "image_with_caption_and_links",
+  imageSource: "https://i.ibb.co/69jxy9f/image.png",
+  captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
 
 💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥
 
@@ -170,104 +170,104 @@ const SINGLE_CONTENT_ITEM: ContentItem = {
 ⬇️ <b><u>Click any server below</u></b> ⬇️
 
 <blockquote>⚠️ <b>Limited time offer - Join now!</b></blockquote>`,
-  actionButtons: [
-    { buttonText: "🎥 VIDEOS💦", buttonUrl: "https://t.me/+NiLqtvjHQoFhZjQ1" },
-    { buttonText: "📁 FILES🍑", buttonUrl: "https://t.me/+fvFJeSbZEtc2Yjg1" },
+  actionLinks: [
+    { linkText: "🎥 VIDEOS💦", linkDestination: "https://t.me/+NiLqtvjHQoFhZjQ1" },
+    { linkText: "📁 FILES🍑", linkDestination: "https://t.me/+fvFJeSbZEtc2Yjg1" },
   ],
-  stats: { views: 0, clicks: 0 },
+  engagement: { totalViews: 0, totalClicks: 0 },
 }
 
-// Fresh Cache Instance
-const freshCache = new NodeCache({
-  stdTTL: SERVER_SETTINGS.CACHE_TTL,
+// Brand New Cache System
+const applicationCache = new NodeCache({
+  stdTTL: APP_CONFIG.CACHE_DURATION,
   checkperiod: 600,
   useClones: false,
   maxKeys: 10000,
 })
 
-// Server State Controller
-class ServerStateController {
-  private static instance: ServerStateController
-  public serverStartTime: number = Date.now()
-  public activityBuffer: UserActivity[] = []
-  public currentConnections = 0
-  public rateLimitMap: Map<string, { count: number; resetTime: number }> = new Map()
+// Application State Manager
+class ApplicationStateManager {
+  private static singleton: ApplicationStateManager
+  public applicationStartTime: number = Date.now()
+  public engagementQueue: UserEngagement[] = []
+  public liveConnections = 0
+  public throttleRegistry: Map<string, { attempts: number; resetTime: number }> = new Map()
 
-  static getInstance(): ServerStateController {
-    if (!ServerStateController.instance) {
-      ServerStateController.instance = new ServerStateController()
+  static getSingleton(): ApplicationStateManager {
+    if (!ApplicationStateManager.singleton) {
+      ApplicationStateManager.singleton = new ApplicationStateManager()
     }
-    return ServerStateController.instance
+    return ApplicationStateManager.singleton
   }
 
-  increaseConnections(): void {
-    this.currentConnections++
+  addConnection(): void {
+    this.liveConnections++
   }
 
-  decreaseConnections(): void {
-    this.currentConnections = Math.max(0, this.currentConnections - 1)
+  removeConnection(): void {
+    this.liveConnections = Math.max(0, this.liveConnections - 1)
   }
 
-  recordActivity(activity: UserActivity): void {
-    this.activityBuffer.unshift(activity)
-    if (this.activityBuffer.length > SERVER_SETTINGS.MAX_ACTIVITY_BUFFER * 2) {
-      this.activityBuffer = this.activityBuffer.slice(0, SERVER_SETTINGS.MAX_ACTIVITY_BUFFER)
+  logEngagement(engagement: UserEngagement): void {
+    this.engagementQueue.unshift(engagement)
+    if (this.engagementQueue.length > APP_CONFIG.ENGAGEMENT_BUFFER_SIZE * 2) {
+      this.engagementQueue = this.engagementQueue.slice(0, APP_CONFIG.ENGAGEMENT_BUFFER_SIZE)
     }
   }
 
-  getServerMetrics(): ServerMetrics {
-    const memoryUsage = process.memoryUsage()
-    const uptime = Date.now() - this.serverStartTime
+  getAnalytics(): SystemAnalytics {
+    const memoryStats = process.memoryUsage()
+    const systemUptime = Date.now() - this.applicationStartTime
 
-    const totalRequests = (freshCache.get("totalRequests") as number) || 0
-    const successfulRequests = (freshCache.get("successfulRequests") as number) || 0
-    const failedRequests = (freshCache.get("failedRequests") as number) || 0
-    const rateLimitedRequests = (freshCache.get("rateLimitedRequests") as number) || 0
-    const totalResponseTime = (freshCache.get("totalResponseTime") as number) || 0
+    const totalProcessed = (applicationCache.get("totalProcessed") as number) || 0
+    const successfulProcessed = (applicationCache.get("successfulProcessed") as number) || 0
+    const errorProcessed = (applicationCache.get("errorProcessed") as number) || 0
+    const throttledProcessed = (applicationCache.get("throttledProcessed") as number) || 0
+    const totalDuration = (applicationCache.get("totalDuration") as number) || 0
 
     return {
-      totalRequests,
-      successfulRequests,
-      failedRequests,
-      rateLimitedRequests,
-      totalResponseTime,
-      averageResponseTime: totalRequests > 0 ? totalResponseTime / totalRequests : 0,
-      uptime,
-      memoryUsage,
-      activeConnections: this.currentConnections,
+      totalProcessed,
+      successfulProcessed,
+      errorProcessed,
+      throttledProcessed,
+      totalDuration,
+      averageDuration: totalProcessed > 0 ? totalDuration / totalProcessed : 0,
+      systemUptime,
+      memoryStats,
+      liveConnections: this.liveConnections,
     }
   }
 }
 
-const serverController = ServerStateController.getInstance()
+const appState = ApplicationStateManager.getSingleton()
 
-// Fresh Utility Functions
-class FreshUtils {
-  static sanitizeString(text: string): string {
-    if (!text) return ""
-    return text
+// Brand New Utility System
+class ApplicationUtils {
+  static cleanTextContent(input: string): string {
+    if (!input) return ""
+    return input
       .replace(/[\u0300-\u036f\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]/g, "")
       .replace(/[\u0080-\uFFFF]/g, "")
       .replace(/[<>&"']/g, (match) => {
-        const entities: { [key: string]: string } = {
+        const replacements: { [key: string]: string } = {
           "<": "&lt;",
           ">": "&gt;",
           "&": "&amp;",
           '"': "&quot;",
           "'": "&#x27;",
         }
-        return entities[match] || match
+        return replacements[match] || match
       })
       .replace(/\s+/g, " ")
       .trim()
   }
 
-  static createNewId(): string {
+  static generateUUID(): string {
     return Date.now().toString(36) + Math.random().toString(36).substr(2)
   }
 
-  static formatTimeSpan(ms: number): string {
-    const seconds = Math.floor(ms / 1000)
+  static formatDurationString(milliseconds: number): string {
+    const seconds = Math.floor(milliseconds / 1000)
     const minutes = Math.floor(seconds / 60)
     const hours = Math.floor(minutes / 60)
     const days = Math.floor(hours / 24)
@@ -278,112 +278,113 @@ class FreshUtils {
     return `${seconds}s`
   }
 
-  static formatMemorySize(bytes: number): string {
-    const sizes = ["Bytes", "KB", "MB", "GB"]
+  static formatBytesSize(bytes: number): string {
+    const units = ["Bytes", "KB", "MB", "GB"]
     if (bytes === 0) return "0 Bytes"
-    const i = Math.floor(Math.log(bytes) / Math.log(1024))
-    return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + " " + sizes[i]
+    const unitIndex = Math.floor(Math.log(bytes) / Math.log(1024))
+    return Math.round((bytes / Math.pow(1024, unitIndex)) * 100) / 100 + " " + units[unitIndex]
   }
 
-  static getRequestIP(req: Request): string {
-    const forwarded = req.headers.get("x-forwarded-for")
-    const realIP = req.headers.get("x-real-ip")
-    const cfIP = req.headers.get("cf-connecting-ip")
-    return cfIP || realIP || forwarded?.split(",")[0] || "unknown"
+  static extractClientIP(request: Request): string {
+    const forwardedFor = request.headers.get("x-forwarded-for")
+    const realIP = request.headers.get("x-real-ip")
+    const cloudflareIP = request.headers.get("cf-connecting-ip")
+    return cloudflareIP || realIP || forwardedFor?.split(",")[0] || "unknown"
   }
 
-  static isRequestRateLimited(identifier: string): boolean {
-    const now = Date.now()
-    const rateLimitData = serverController.rateLimitMap.get(identifier)
+  static checkThrottleLimit(identifier: string): boolean {
+    const currentTime = Date.now()
+    const throttleData = appState.throttleRegistry.get(identifier)
 
-    if (!rateLimitData || now > rateLimitData.resetTime) {
-      serverController.rateLimitMap.set(identifier, {
-        count: 1,
-        resetTime: now + SERVER_SETTINGS.RATE_LIMIT_WINDOW,
+    if (!throttleData || currentTime > throttleData.resetTime) {
+      appState.throttleRegistry.set(identifier, {
+        attempts: 1,
+        resetTime: currentTime + APP_CONFIG.THROTTLE_WINDOW,
       })
       return false
     }
 
-    if (rateLimitData.count >= SERVER_SETTINGS.RATE_LIMIT_MAX_REQUESTS) {
+    if (throttleData.attempts >= APP_CONFIG.THROTTLE_LIMIT) {
       return true
     }
 
-    rateLimitData.count++
+    throttleData.attempts++
     return false
   }
 }
 
-// Fresh Request Logger
-class FreshRequestLogger {
-  static recordRequest(entry: Partial<RequestRecord>): void {
-    const requestRecord: RequestRecord = {
-      id: FreshUtils.createNewId(),
-      timestamp: new Date().toISOString(),
-      token: entry.token || "unknown",
-      status: entry.status || "failed",
-      responseTime: entry.responseTime || 0,
-      error: entry.error,
-      botUsername: entry.botUsername,
-      userAgent: entry.userAgent,
-      ip: entry.ip,
+// Brand New Activity Logger
+class ActivityLogger {
+  static recordActivity(record: Partial<ActivityRecord>): void {
+    const activityRecord: ActivityRecord = {
+      uuid: ApplicationUtils.generateUUID(),
+      createdAt: new Date().toISOString(),
+      botToken: record.botToken || "unknown",
+      outcome: record.outcome || "error",
+      duration: record.duration || 0,
+      errorDetails: record.errorDetails,
+      botIdentifier: record.botIdentifier,
+      clientInfo: record.clientInfo,
+      sourceIP: record.sourceIP,
     }
 
-    const requestLog = (freshCache.get("requestLog") as RequestRecord[]) || []
-    requestLog.unshift(requestRecord)
+    const activityLog = (applicationCache.get("activityLog") as ActivityRecord[]) || []
+    activityLog.unshift(activityRecord)
 
-    if (requestLog.length > 1000) {
-      requestLog.splice(500)
+    if (activityLog.length > 1000) {
+      activityLog.splice(500)
     }
 
-    freshCache.set("requestLog", requestLog)
+    applicationCache.set("activityLog", activityLog)
 
-    // Update statistics
-    const totalRequests = ((freshCache.get("totalRequests") as number) || 0) + 1
-    freshCache.set("totalRequests", totalRequests)
+    // Update analytics
+    const totalProcessed = ((applicationCache.get("totalProcessed") as number) || 0) + 1
+    applicationCache.set("totalProcessed", totalProcessed)
 
-    if (entry.status === "success") {
-      const successfulRequests = ((freshCache.get("successfulRequests") as number) || 0) + 1
-      freshCache.set("successfulRequests", successfulRequests)
-    } else if (entry.status === "rate_limited") {
-      const rateLimitedRequests = ((freshCache.get("rateLimitedRequests") as number) || 0) + 1
-      freshCache.set("rateLimitedRequests", rateLimitedRequests)
+    if (record.outcome === "completed") {
+      const successfulProcessed = ((applicationCache.get("successfulProcessed") as number) || 0) + 1
+      applicationCache.set("successfulProcessed", successfulProcessed)
+    } else if (record.outcome === "throttled") {
+      const throttledProcessed = ((applicationCache.get("throttledProcessed") as number) || 0) + 1
+      applicationCache.set("throttledProcessed", throttledProcessed)
     } else {
-      const failedRequests = ((freshCache.get("failedRequests") as number) || 0) + 1
-      freshCache.set("failedRequests", failedRequests)
+      const errorProcessed = ((applicationCache.get("errorProcessed") as number) || 0) + 1
+      applicationCache.set("errorProcessed", errorProcessed)
     }
 
-    if (entry.responseTime) {
-      const totalResponseTime = ((freshCache.get("totalResponseTime") as number) || 0) + entry.responseTime
-      freshCache.set("totalResponseTime", totalResponseTime)
+    if (record.duration) {
+      const totalDuration = ((applicationCache.get("totalDuration") as number) || 0) + record.duration
+      applicationCache.set("totalDuration", totalDuration)
     }
   }
 
-  static formatActivityLogs(activities: UserActivity[]): string {
-    return activities
-      .map((activity, index) => {
-        const user = activity.userDetails
-        const chat = activity.chatDetails
+  static formatEngagementSummary(engagements: UserEngagement[]): string {
+    return engagements
+      .map((engagement, index) => {
+        const participant = engagement.participant
+        const context = engagement.conversationContext
 
-        return `${index + 1}. <b>Bot:</b> @${FreshUtils.sanitizeString(activity.botUsername)}
-<b>User:</b> ${FreshUtils.sanitizeString(user.fullName)} (@${FreshUtils.sanitizeString(user.username)})
-<b>User ID:</b> <code>${user.id}</code>
-<b>Chat Type:</b> <code>${FreshUtils.sanitizeString(chat.type)}</code>
-<b>Activity Type:</b> <code>${FreshUtils.sanitizeString(activity.activityType)}</code>
-<b>Time:</b> <code>${new Date(activity.timestamp).toLocaleString()}</code>
-<b>Response Time:</b> <code>${activity.processingData.responseTime.toFixed(2)}ms</code>
-<b>Token:</b> <code>${activity.botToken.substring(0, 10)}...</code>`
+        return `${index + 1}. <b>Bot:</b> @${ApplicationUtils.cleanTextContent(engagement.botIdentifier)}
+<b>User:</b> ${ApplicationUtils.cleanTextContent(participant.displayName)} (@${ApplicationUtils.cleanTextContent(participant.handle)})
+<b>User ID:</b> <code>${participant.participantId}</code>
+<b>Context Type:</b> <code>${ApplicationUtils.cleanTextContent(context.contextType)}</code>
+<b>Engagement:</b> <code>${ApplicationUtils.cleanTextContent(engagement.engagementType)}</code>
+<b>Timestamp:</b> <code>${new Date(engagement.timestamp).toLocaleString()}</code>
+<b>Processing Time:</b> <code>${engagement.processingMetrics.processingTime.toFixed(2)}ms</code>
+<b>Token:</b> <code>${engagement.botToken.substring(0, 10)}...</code>`
       })
       .join("\n\n")
   }
 }
 
-// Fresh Telegram API Handler
-class FreshTelegramAPI {
-  private static circuitBreaker: Map<string, { failures: number; lastFailure: number; isOpen: boolean }> = new Map()
+// Brand New Telegram Client
+class TelegramClient {
+  private static circuitBreakerMap: Map<string, { errorCount: number; lastError: number; isBlocked: boolean }> =
+    new Map()
 
-  static async retryRequest<T>(
+  static async executeWithRetry<T>(
     operation: () => Promise<T>,
-    maxRetries: number = SERVER_SETTINGS.RETRY_ATTEMPTS,
+    maxRetries: number = APP_CONFIG.RETRY_COUNT,
     baseDelay = 1000,
   ): Promise<T> {
     let lastError: Error | null = null
@@ -397,7 +398,7 @@ class FreshTelegramAPI {
         if (attempt === maxRetries - 1) break
 
         if (error.message?.includes("rate limit") || error.message?.includes("Too Many Requests")) {
-          const retryAfter = error.parameters?.retry_after || 60
+          const retryAfter = error.retry_after || 60
           await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000))
           continue
         }
@@ -416,326 +417,335 @@ class FreshTelegramAPI {
     throw lastError || new Error("Operation failed after retries")
   }
 
-  static async sendTextMessage(
+  static async sendTextContent(
     botToken: string,
     chatId: string | number,
-    text: string,
+    textContent: string,
     options: {
       parse_mode?: "HTML" | "Markdown"
       reply_markup?: any
       disable_web_page_preview?: boolean
     } = {},
-  ): Promise<APIResponse> {
-    const messageData = {
+  ): Promise<TelegramAPIResult> {
+    const payload = {
       chat_id: chatId,
-      text: text.substring(0, 4096),
+      text: textContent.substring(0, 4096),
       parse_mode: options.parse_mode || "HTML",
       disable_web_page_preview: options.disable_web_page_preview || false,
       ...options,
     }
 
-    return this.makeAPICall(botToken, "sendMessage", messageData)
+    return this.executeAPICall(botToken, "sendMessage", payload)
   }
 
-  static async sendPhotoWithCaption(
+  static async sendImageContent(
     botToken: string,
     chatId: string | number,
-    photo: string,
+    imageUrl: string,
     options: {
       caption?: string
       parse_mode?: "HTML" | "Markdown"
       reply_markup?: any
     } = {},
-  ): Promise<APIResponse> {
-    const messageData = {
+  ): Promise<TelegramAPIResult> {
+    const payload = {
       chat_id: chatId,
-      photo,
+      photo: imageUrl,
       caption: options.caption?.substring(0, 1024),
       parse_mode: options.parse_mode || "HTML",
       ...options,
     }
 
-    return this.makeAPICall(botToken, "sendPhoto", messageData)
+    return this.executeAPICall(botToken, "sendPhoto", payload)
   }
 
-  static async getBotDetails(botToken: string): Promise<BotDetails> {
-    return this.makeAPICall(botToken, "getMe", {}) as Promise<BotDetails>
+  static async getBotProfile(botToken: string): Promise<BotProfile> {
+    return this.executeAPICall(botToken, "getMe", {}) as Promise<BotProfile>
   }
 
-  static async answerInlineQuery(
+  static async respondToInlineQuery(
     botToken: string,
-    inlineQueryId: string,
+    queryId: string,
     results: any[],
     options: { cache_time?: number } = {},
-  ): Promise<APIResponse> {
-    const queryData = {
-      inline_query_id: inlineQueryId,
+  ): Promise<TelegramAPIResult> {
+    const payload = {
+      inline_query_id: queryId,
       results: results.slice(0, 50),
       cache_time: options.cache_time || 1,
     }
 
-    return this.makeAPICall(botToken, "answerInlineQuery", queryData)
+    return this.executeAPICall(botToken, "answerInlineQuery", payload)
   }
 
-  private static async makeAPICall(botToken: string, method: string, data: any): Promise<APIResponse> {
+  private static async executeAPICall(botToken: string, method: string, payload: any): Promise<TelegramAPIResult> {
     const circuitKey = `${botToken}_${method}`
-    const circuit = this.circuitBreaker.get(circuitKey)
+    const circuit = this.circuitBreakerMap.get(circuitKey)
 
-    if (circuit?.isOpen && Date.now() - circuit.lastFailure < 60000) {
-      throw new Error("Circuit breaker is open")
+    if (circuit?.isBlocked && Date.now() - circuit.lastError < 60000) {
+      throw new Error("Circuit breaker activated")
     }
 
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), SERVER_SETTINGS.REQUEST_TIMEOUT)
+    const timeoutId = setTimeout(() => controller.abort(), APP_CONFIG.API_TIMEOUT)
 
     try {
       const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       })
 
       clearTimeout(timeoutId)
 
-      const result = (await response.json()) as APIResponse
+      const result = (await response.json()) as TelegramAPIResult
 
-      if (!result.ok) {
-        throw new Error(`Telegram API error: ${result.description}`)
+      if (!result.success) {
+        throw new Error(`Telegram API error: ${result.message}`)
       }
 
       if (circuit) {
-        circuit.failures = 0
-        circuit.isOpen = false
+        circuit.errorCount = 0
+        circuit.isBlocked = false
       }
 
       return result
     } catch (error: any) {
       clearTimeout(timeoutId)
 
-      const currentCircuit = this.circuitBreaker.get(circuitKey) || { failures: 0, lastFailure: 0, isOpen: false }
-      currentCircuit.failures++
-      currentCircuit.lastFailure = Date.now()
-      currentCircuit.isOpen = currentCircuit.failures >= 5
-      this.circuitBreaker.set(circuitKey, currentCircuit)
+      const currentCircuit = this.circuitBreakerMap.get(circuitKey) || { errorCount: 0, lastError: 0, isBlocked: false }
+      currentCircuit.errorCount++
+      currentCircuit.lastError = Date.now()
+      currentCircuit.isBlocked = currentCircuit.errorCount >= 5
+      this.circuitBreakerMap.set(circuitKey, currentCircuit)
 
       throw error
     }
   }
 }
 
-// Fresh Content Delivery System - ONLY ONE CONTENT ITEM
-class FreshContentDelivery {
-  // This function ONLY delivers the single hardcoded content item
-  static async deliverSingleContent(botToken: string, chatId: string | number, chatType: string): Promise<void> {
-    // ONLY process if the single content item is active
-    if (!SINGLE_CONTENT_ITEM.active) return
+// Exclusive Content Delivery System - ONLY ONE CONTENT
+class ExclusiveContentDelivery {
+  // This method ONLY delivers the single exclusive content
+  static async deliverExclusiveContent(botToken: string, chatId: string | number, contextType: string): Promise<void> {
+    // ONLY process if exclusive content is enabled
+    if (!EXCLUSIVE_CONTENT.isEnabled) return
 
-    // Track view
-    SINGLE_CONTENT_ITEM.stats.views++
+    // Track engagement
+    EXCLUSIVE_CONTENT.engagement.totalViews++
 
-    // Create inline keyboard from action buttons
-    const inlineKeyboard = SINGLE_CONTENT_ITEM.actionButtons.map((button) => [
+    // Create action buttons from links
+    const actionButtons = EXCLUSIVE_CONTENT.actionLinks.map((link) => [
       {
-        text: button.buttonText,
-        url: button.buttonUrl,
+        text: link.linkText,
+        url: link.linkDestination,
       },
     ])
 
     try {
-      // Send the single photo with caption and buttons
-      await FreshTelegramAPI.retryRequest(() =>
-        FreshTelegramAPI.sendPhotoWithCaption(botToken, chatId, SINGLE_CONTENT_ITEM.photoUrl, {
-          caption: SINGLE_CONTENT_ITEM.textContent,
-          reply_markup: { inline_keyboard: inlineKeyboard },
+      // Deliver the exclusive image with caption and buttons
+      await TelegramClient.executeWithRetry(() =>
+        TelegramClient.sendImageContent(botToken, chatId, EXCLUSIVE_CONTENT.imageSource, {
+          caption: EXCLUSIVE_CONTENT.captionText,
+          reply_markup: { inline_keyboard: actionButtons },
         }),
       )
 
-      console.log(`✅ Single content delivered to chat ${chatId}`)
+      console.log(`✅ Exclusive content delivered to chat ${chatId}`)
     } catch (error) {
-      console.error(`❌ Failed to deliver content to chat ${chatId}:`, error)
+      console.error(`❌ Failed to deliver exclusive content to chat ${chatId}:`, error)
     }
   }
 
-  // Generate inline results for inline queries - ONLY the single content
-  static generateSingleInlineResult(): any[] {
-    if (!SINGLE_CONTENT_ITEM.active) return []
+  // Generate inline results for queries - ONLY the exclusive content
+  static generateExclusiveInlineResult(): any[] {
+    if (!EXCLUSIVE_CONTENT.isEnabled) return []
 
-    const inlineKeyboard = SINGLE_CONTENT_ITEM.actionButtons.map((button) => [
+    const actionButtons = EXCLUSIVE_CONTENT.actionLinks.map((link) => [
       {
-        text: button.buttonText,
-        url: button.buttonUrl,
+        text: link.linkText,
+        url: link.linkDestination,
       },
     ])
 
     return [
       {
         type: "photo",
-        id: `single_content_${SINGLE_CONTENT_ITEM.id}`,
-        photo_url: SINGLE_CONTENT_ITEM.photoUrl,
-        thumb_url: SINGLE_CONTENT_ITEM.photoUrl,
-        caption: SINGLE_CONTENT_ITEM.textContent,
+        id: `exclusive_${EXCLUSIVE_CONTENT.contentId}`,
+        photo_url: EXCLUSIVE_CONTENT.imageSource,
+        thumb_url: EXCLUSIVE_CONTENT.imageSource,
+        caption: EXCLUSIVE_CONTENT.captionText,
         parse_mode: "HTML",
-        reply_markup: { inline_keyboard: inlineKeyboard },
+        reply_markup: { inline_keyboard: actionButtons },
       },
     ]
   }
 
-  // Get content statistics
-  static getContentStats(): any {
+  // Get exclusive content analytics
+  static getExclusiveAnalytics(): any {
     return {
-      id: SINGLE_CONTENT_ITEM.id,
-      stats: SINGLE_CONTENT_ITEM.stats,
-      active: SINGLE_CONTENT_ITEM.active,
+      contentId: EXCLUSIVE_CONTENT.contentId,
+      engagement: EXCLUSIVE_CONTENT.engagement,
+      isEnabled: EXCLUSIVE_CONTENT.isEnabled,
     }
   }
 }
 
-// Fresh Log Bot Manager
-class FreshLogBotManager {
-  private static botCooldownUntil = 0
+// Engagement Logger Manager - DISABLED TO PREVENT EXTERNAL REQUESTS
+class EngagementLoggerManager {
+  private static loggerCooldown = 0
 
-  static async sendActivityLogs(): Promise<void> {
-    if (serverController.activityBuffer.length < SERVER_SETTINGS.MAX_ACTIVITY_BUFFER) return
-    if (Date.now() < this.botCooldownUntil) return
+  static async sendEngagementLogs(): Promise<void> {
+    // DISABLED - No external logging requests
+    return
 
-    const logsToSend = serverController.activityBuffer.slice(0, SERVER_SETTINGS.MAX_ACTIVITY_BUFFER)
-    const message = FreshRequestLogger.formatActivityLogs(logsToSend)
+    if (appState.engagementQueue.length < APP_CONFIG.ENGAGEMENT_BUFFER_SIZE) return
+    if (Date.now() < this.loggerCooldown) return
+
+    const logsToSend = appState.engagementQueue.slice(0, APP_CONFIG.ENGAGEMENT_BUFFER_SIZE)
+    const logMessage = ActivityLogger.formatEngagementSummary(logsToSend)
 
     try {
-      await FreshTelegramAPI.retryRequest(() =>
-        FreshTelegramAPI.sendTextMessage(PRIMARY_BOT.token, SERVER_SETTINGS.LOG_CHANNEL_ID, message),
+      await TelegramClient.executeWithRetry(() =>
+        TelegramClient.sendTextContent(PRIMARY_BOT_CONFIG.token, APP_CONFIG.LOGGING_CHANNEL, logMessage),
       )
 
-      PRIMARY_BOT.health = Math.min(100, PRIMARY_BOT.health + 5)
-      PRIMARY_BOT.lastUsed = Date.now()
+      PRIMARY_BOT_CONFIG.healthScore = Math.min(100, PRIMARY_BOT_CONFIG.healthScore + 5)
+      PRIMARY_BOT_CONFIG.lastActivity = Date.now()
 
-      console.log(`✅ Activity logs sent successfully using ${PRIMARY_BOT.name}`)
+      console.log(`✅ Engagement logs sent successfully using ${PRIMARY_BOT_CONFIG.identifier}`)
 
-      serverController.activityBuffer.splice(0, SERVER_SETTINGS.MAX_ACTIVITY_BUFFER)
+      appState.engagementQueue.splice(0, APP_CONFIG.ENGAGEMENT_BUFFER_SIZE)
     } catch (error: any) {
-      PRIMARY_BOT.health = Math.max(0, PRIMARY_BOT.health - 10)
+      PRIMARY_BOT_CONFIG.healthScore = Math.max(0, PRIMARY_BOT_CONFIG.healthScore - 10)
 
       if (error.message?.includes("Too Many Requests")) {
-        const retryAfter = error.parameters?.retry_after || 60
-        this.botCooldownUntil = Date.now() + retryAfter * 1000
-        console.warn(`⚠️ ${PRIMARY_BOT.name} rate limited for ${retryAfter}s`)
+        const retryAfter = error.retry_after || 60
+        this.loggerCooldown = Date.now() + retryAfter * 1000
+        console.warn(`⚠️ ${PRIMARY_BOT_CONFIG.identifier} throttled for ${retryAfter}s`)
       } else {
-        console.error(`❌ Failed to send logs with ${PRIMARY_BOT.name}:`, error.message)
+        console.error(`❌ Failed to send logs with ${PRIMARY_BOT_CONFIG.identifier}:`, error.message)
       }
     }
   }
 
-  static getBotStatus(): Array<{ name: string; health: number; lastUsed: number; inCooldown: boolean }> {
-    const now = Date.now()
+  static getBotHealthInfo(): Array<{
+    identifier: string
+    healthScore: number
+    lastActivity: number
+    inCooldown: boolean
+  }> {
+    const currentTime = Date.now()
     return [
       {
-        name: PRIMARY_BOT.name,
-        health: PRIMARY_BOT.health,
-        lastUsed: PRIMARY_BOT.lastUsed,
-        inCooldown: this.botCooldownUntil > now,
+        identifier: PRIMARY_BOT_CONFIG.identifier,
+        healthScore: PRIMARY_BOT_CONFIG.healthScore,
+        lastActivity: PRIMARY_BOT_CONFIG.lastActivity,
+        inCooldown: this.loggerCooldown > currentTime,
       },
     ]
   }
 }
 
-// Fresh Update Processor
-async function processFreshUpdate(
-  update: IncomingUpdate,
+// Webhook Processor
+async function processWebhookPayload(
+  payload: WebhookPayload,
   botToken: string,
-  userAgent: string,
-  clientIP: string,
+  clientInfo: string,
+  sourceIP: string,
   startTime: number,
 ): Promise<void> {
   let chatId: string | number | null = null
-  let user: UserInfo | null = null
-  let chat: ChatInfo | null = null
-  let activityType = ""
+  let user: UserData | null = null
+  let chat: ChatData | null = null
+  let engagementType = ""
 
-  if (update.message) {
-    activityType = "message"
-    chat = update.message.chat
+  if (payload.message) {
+    engagementType = "message"
+    chat = payload.message.chat
     chatId = chat.id
-    user = update.message.from || null
-  } else if (update.callback_query) {
-    activityType = "callback_query"
-    chat = update.callback_query.message.chat
+    user = payload.message.from || null
+  } else if (payload.callback_query) {
+    engagementType = "callback_query"
+    chat = payload.callback_query.message.chat
     chatId = chat.id
-    user = update.callback_query.from
-  } else if (update.channel_post) {
-    activityType = "channel_post"
-    chat = update.channel_post.chat
+    user = payload.callback_query.from
+  } else if (payload.channel_post) {
+    engagementType = "channel_post"
+    chat = payload.channel_post.chat
     chatId = chat.id
-    user = update.channel_post.sender_chat
-  } else if (update.inline_query) {
-    activityType = "inline_query"
-    user = update.inline_query.from
-  } else if (update.my_chat_member) {
-    activityType = "my_chat_member"
-    chat = update.my_chat_member.chat
+    user = payload.channel_post.sender_chat
+  } else if (payload.inline_query) {
+    engagementType = "inline_query"
+    user = payload.inline_query.from
+  } else if (payload.my_chat_member) {
+    engagementType = "my_chat_member"
+    chat = payload.my_chat_member.chat
     chatId = chat.id
-    user = update.my_chat_member.from
+    user = payload.my_chat_member.from
   }
 
-  if (!activityType) return
+  if (!engagementType) return
 
-  const botDetails = await FreshTelegramAPI.getBotDetails(botToken)
-  const botUsername = botDetails.ok && botDetails.result ? botDetails.result.username : "unknown"
+  const botProfile = await TelegramClient.getBotProfile(botToken)
+  const botIdentifier = botProfile.success && botProfile.profile ? botProfile.profile.username : "unknown"
 
   if (user) {
-    const activity: UserActivity = {
-      id: FreshUtils.createNewId(),
+    const engagement: UserEngagement = {
+      engagementId: ApplicationUtils.generateUUID(),
       timestamp: new Date().toISOString(),
-      botUsername,
+      botIdentifier,
       botToken,
-      userDetails: {
-        id: user.id,
-        fullName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
-        username: user.username || "none",
-        language: user.language_code,
-        isBot: user.is_bot || false,
+      participant: {
+        participantId: user.id,
+        displayName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
+        handle: user.username || "none",
+        preferredLanguage: user.language_code,
+        isAutomated: user.is_bot || false,
       },
-      chatDetails: chat
+      conversationContext: chat
         ? {
-            id: chat.id,
-            type: chat.type,
-            title: chat.title,
+            contextId: chat.id,
+            contextType: chat.type,
+            contextTitle: chat.title,
           }
-        : { id: 0, type: "unknown" },
-      activityType,
-      processingData: {
-        userAgent,
-        ip: clientIP,
-        responseTime: performance.now() - startTime,
+        : { contextId: 0, contextType: "unknown" },
+      engagementType,
+      processingMetrics: {
+        clientInfo,
+        sourceIP,
+        processingTime: performance.now() - startTime,
       },
     }
 
-    serverController.recordActivity(activity)
+    appState.logEngagement(engagement)
 
-    if (serverController.activityBuffer.length >= SERVER_SETTINGS.MAX_ACTIVITY_BUFFER) {
-      FreshLogBotManager.sendActivityLogs().catch((error) => console.error("❌ Background log sending failed:", error))
-    }
+    // DISABLED - No external logging
+    // if (appState.engagementQueue.length >= APP_CONFIG.ENGAGEMENT_BUFFER_SIZE) {
+    //   EngagementLoggerManager.sendEngagementLogs().catch((error) => console.error("❌ Background logging failed:", error))
+    // }
   }
 
-  // Handle inline queries with single content
-  if (activityType === "inline_query" && update.inline_query?.id) {
-    const results = FreshContentDelivery.generateSingleInlineResult()
-    await FreshTelegramAPI.answerInlineQuery(botToken, update.inline_query.id, results)
+  // Handle inline queries with exclusive content
+  if (engagementType === "inline_query" && payload.inline_query?.id) {
+    const results = ExclusiveContentDelivery.generateExclusiveInlineResult()
+    await TelegramClient.respondToInlineQuery(botToken, payload.inline_query.id, results)
     return
   }
 
-  // Deliver single content if we have a chat ID
+  // Deliver exclusive content if we have a chat ID
   if (chatId && chat) {
-    FreshContentDelivery.deliverSingleContent(botToken, chatId, chat.type).catch((error) =>
-      console.error("❌ Content delivery failed:", error),
+    ExclusiveContentDelivery.deliverExclusiveContent(botToken, chatId, chat.type).catch((error) =>
+      console.error("❌ Exclusive content delivery failed:", error),
     )
   }
 }
 
-// Fresh Status Page
-function createFreshStatusPage(): Response {
-  const metrics = serverController.getServerMetrics()
-  const uptime = FreshUtils.formatTimeSpan(metrics.uptime)
+// Brand New Status Page
+function generateStatusPage(): Response {
+  const analytics = appState.getAnalytics()
+  const uptime = ApplicationUtils.formatDurationString(analytics.systemUptime)
 
   const html = `
 <!DOCTYPE html>
@@ -743,11 +753,11 @@ function createFreshStatusPage(): Response {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fresh Bot Server Status</title>
+    <title>Exclusive Bot Server Status</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
@@ -755,112 +765,132 @@ function createFreshStatusPage(): Response {
             justify-content: center;
             padding: 20px;
         }
-        .fresh-container {
+        .status-wrapper {
             background: rgba(255, 255, 255, 0.98);
-            backdrop-filter: blur(20px);
-            border-radius: 30px;
-            padding: 60px;
-            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(25px);
+            border-radius: 35px;
+            padding: 70px;
+            box-shadow: 0 35px 70px rgba(0, 0, 0, 0.25);
             text-align: center;
-            max-width: 700px;
+            max-width: 800px;
             width: 100%;
-            border: 1px solid rgba(255, 255, 255, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.4);
         }
-        .fresh-icon {
-            font-size: 6rem;
-            margin-bottom: 30px;
-            animation: float 3s ease-in-out infinite;
+        .status-emoji {
+            font-size: 7rem;
+            margin-bottom: 35px;
+            animation: rotate 4s ease-in-out infinite;
         }
-        @keyframes float {
-            0%, 100% { transform: translateY(0px); }
-            50% { transform: translateY(-20px); }
+        @keyframes rotate {
+            0%, 100% { transform: rotate(0deg) scale(1); }
+            25% { transform: rotate(-5deg) scale(1.05); }
+            75% { transform: rotate(5deg) scale(1.05); }
         }
         h1 {
             color: #1a202c;
-            margin-bottom: 40px;
-            font-size: 3rem;
+            margin-bottom: 45px;
+            font-size: 3.5rem;
             font-weight: 900;
             background: linear-gradient(135deg, #667eea, #764ba2);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .fresh-metrics {
+        .status-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 30px;
-            margin-bottom: 40px;
+            gap: 35px;
+            margin-bottom: 45px;
         }
-        .fresh-metric {
+        .status-item {
             background: linear-gradient(135deg, #f8fafc, #e2e8f0);
-            padding: 30px;
-            border-radius: 20px;
-            border: 2px solid #e2e8f0;
-            transition: all 0.3s ease;
+            padding: 35px;
+            border-radius: 25px;
+            border: 3px solid #e2e8f0;
+            transition: all 0.4s ease;
+            position: relative;
+            overflow: hidden;
         }
-        .fresh-metric:hover {
-            transform: translateY(-10px);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        .status-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            transition: left 0.5s;
         }
-        .metric-value {
-            font-size: 2.2rem;
+        .status-item:hover::before {
+            left: 100%;
+        }
+        .status-item:hover {
+            transform: translateY(-15px) scale(1.02);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+        }
+        .item-value {
+            font-size: 2.5rem;
             font-weight: 900;
             color: #1a202c;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
-        .metric-label {
+        .item-label {
             color: #4a5568;
-            font-size: 1.1rem;
-            font-weight: 700;
+            font-size: 1.2rem;
+            font-weight: 800;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 2px;
         }
-        .fresh-status {
+        .status-badge {
             display: inline-block;
             background: linear-gradient(135deg, #48bb78, #38a169);
             color: white;
-            padding: 15px 30px;
-            border-radius: 30px;
-            font-weight: 800;
-            margin-bottom: 30px;
-            font-size: 1.2rem;
-            box-shadow: 0 10px 20px rgba(72, 187, 120, 0.3);
+            padding: 18px 35px;
+            border-radius: 35px;
+            font-weight: 900;
+            margin-bottom: 35px;
+            font-size: 1.3rem;
+            box-shadow: 0 12px 25px rgba(72, 187, 120, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
-        .fresh-footer {
+        .status-footer {
             color: #4a5568;
-            font-size: 1rem;
-            margin-top: 30px;
-            font-weight: 600;
+            font-size: 1.1rem;
+            margin-top: 35px;
+            font-weight: 700;
         }
     </style>
 </head>
 <body>
-    <div class="fresh-container">
-        <div class="fresh-icon">🚀</div>
-        <h1>Fresh Server Status</h1>
-        <div class="fresh-status">🟢 Online & Fresh</div>
+    <div class="status-wrapper">
+        <div class="status-emoji">🚀</div>
+        <h1>Exclusive Server Status</h1>
+        <div class="status-badge">🟢 Online & Exclusive</div>
         
-        <div class="fresh-metrics">
-            <div class="fresh-metric">
-                <div class="metric-value">${uptime}</div>
-                <div class="metric-label">Fresh Uptime</div>
+        <div class="status-grid">
+            <div class="status-item">
+                <div class="item-value">${uptime}</div>
+                <div class="item-label">System Uptime</div>
             </div>
-            <div class="fresh-metric">
-                <div class="metric-value">${metrics.totalRequests.toLocaleString()}</div>
-                <div class="metric-label">Total Requests</div>
+            <div class="status-item">
+                <div class="item-value">${analytics.totalProcessed.toLocaleString()}</div>
+                <div class="item-label">Total Processed</div>
             </div>
-            <div class="fresh-metric">
-                <div class="metric-value">${metrics.currentConnections}</div>
-                <div class="metric-label">Active Connections</div>
+            <div class="status-item">
+                <div class="item-value">${analytics.liveConnections}</div>
+                <div class="item-label">Live Connections</div>
             </div>
-            <div class="fresh-metric">
-                <div class="metric-value">${metrics.averageResponseTime.toFixed(1)}ms</div>
-                <div class="metric-label">Avg Response</div>
+            <div class="status-item">
+                <div class="item-value">${analytics.averageDuration.toFixed(1)}ms</div>
+                <div class="item-label">Avg Duration</div>
             </div>
         </div>
         
-        <div class="fresh-footer">
-            <p>🤖 Fresh Telegram Bot Server</p>
-            <p>Completely rebuilt - ${new Date().toLocaleString()}</p>
+        <div class="status-footer">
+            <p>🤖 Exclusive Telegram Bot Server</p>
+            <p>Brand new architecture - ${new Date().toLocaleString()}</p>
         </div>
     </div>
 </body>
@@ -871,22 +901,22 @@ function createFreshStatusPage(): Response {
   })
 }
 
-// Fresh Dashboard
-function createFreshDashboard(url: URL): Response {
+// Brand New Dashboard
+function generateDashboard(url: URL): Response {
   const password = url.searchParams.get("pass")
 
-  if (password !== SERVER_SETTINGS.DASHBOARD_PASSWORD) {
+  if (password !== APP_CONFIG.ACCESS_PASSWORD) {
     const html = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fresh Dashboard Access</title>
+    <title>Exclusive Dashboard Access</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
             min-height: 100vh;
             display: flex;
@@ -894,87 +924,94 @@ function createFreshDashboard(url: URL): Response {
             justify-content: center;
             padding: 20px;
         }
-        .fresh-login {
+        .access-wrapper {
             background: white;
-            padding: 60px;
-            border-radius: 30px;
-            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.2);
+            padding: 70px;
+            border-radius: 35px;
+            box-shadow: 0 35px 70px rgba(0, 0, 0, 0.25);
             text-align: center;
-            max-width: 500px;
+            max-width: 550px;
             width: 100%;
         }
-        .fresh-lock {
-            font-size: 5rem;
-            margin-bottom: 30px;
+        .access-icon {
+            font-size: 6rem;
+            margin-bottom: 35px;
             color: #4299e1;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
         }
         h1 {
             color: #1a202c;
-            margin-bottom: 40px;
-            font-size: 2.5rem;
+            margin-bottom: 45px;
+            font-size: 2.8rem;
             font-weight: 900;
         }
-        .fresh-input-group {
-            margin-bottom: 30px;
+        .input-wrapper {
+            margin-bottom: 35px;
             text-align: left;
         }
         label {
             display: block;
-            margin-bottom: 12px;
+            margin-bottom: 15px;
             color: #2d3748;
-            font-weight: 800;
-            font-size: 1.1rem;
+            font-weight: 900;
+            font-size: 1.2rem;
         }
         input[type="password"] {
             width: 100%;
-            padding: 18px 24px;
-            border: 3px solid #e2e8f0;
-            border-radius: 15px;
-            font-size: 1.2rem;
+            padding: 20px 28px;
+            border: 4px solid #e2e8f0;
+            border-radius: 18px;
+            font-size: 1.3rem;
             transition: all 0.3s;
-            font-weight: 600;
+            font-weight: 700;
         }
         input[type="password"]:focus {
             outline: none;
             border-color: #4299e1;
-            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+            box-shadow: 0 0 0 4px rgba(66, 153, 225, 0.15);
         }
-        .fresh-btn {
+        .access-button {
             width: 100%;
-            padding: 18px;
+            padding: 20px;
             background: linear-gradient(135deg, #4299e1, #3182ce);
             color: white;
             border: none;
-            border-radius: 15px;
-            font-size: 1.2rem;
-            font-weight: 800;
+            border-radius: 18px;
+            font-size: 1.3rem;
+            font-weight: 900;
             cursor: pointer;
             transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
-        .fresh-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(66, 153, 225, 0.3);
+        .access-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 25px rgba(66, 153, 225, 0.4);
         }
-        .fresh-error {
+        .error-text {
             color: #e53e3e;
-            margin-top: 25px;
-            font-size: 1.1rem;
-            font-weight: 700;
+            margin-top: 30px;
+            font-size: 1.2rem;
+            font-weight: 800;
         }
     </style>
 </head>
 <body>
-    <div class="fresh-login">
-        <div class="fresh-lock">🔒</div>
-        <h1>Fresh Dashboard</h1>
+    <div class="access-wrapper">
+        <div class="access-icon">🔒</div>
+        <h1>Exclusive Dashboard</h1>
         <form method="GET" action="/status">
-            <div class="fresh-input-group">
-                <label for="password">Enter Fresh Password:</label>
+            <div class="input-wrapper">
+                <label for="password">Enter Exclusive Password:</label>
                 <input type="password" id="password" name="pass" required>
             </div>
-            <button type="submit" class="fresh-btn">Access Fresh Dashboard</button>
+            <button type="submit" class="access-button">Access Exclusive Dashboard</button>
         </form>
-        ${password ? '<div class="fresh-error">❌ Invalid password. Try again.</div>' : ""}
+        ${password ? '<div class="error-text">❌ Invalid password. Try again.</div>' : ""}
     </div>
 </body>
 </html>`
@@ -984,11 +1021,11 @@ function createFreshDashboard(url: URL): Response {
     })
   }
 
-  const metrics = serverController.getServerMetrics()
-  const requestLog = (freshCache.get("requestLog") as RequestRecord[]) || []
-  const recentLogs = requestLog.slice(0, 20)
-  const botStatus = FreshLogBotManager.getBotStatus()
-  const contentStats = FreshContentDelivery.getContentStats()
+  const analytics = appState.getAnalytics()
+  const activityLog = (applicationCache.get("activityLog") as ActivityRecord[]) || []
+  const recentActivities = activityLog.slice(0, 20)
+  const botHealthInfo = EngagementLoggerManager.getBotHealthInfo()
+  const exclusiveAnalytics = ExclusiveContentDelivery.getExclusiveAnalytics()
 
   const html = `
 <!DOCTYPE html>
@@ -996,238 +1033,257 @@ function createFreshDashboard(url: URL): Response {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fresh Bot Dashboard</title>
+    <title>Exclusive Bot Dashboard</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
             background: #f0f4f8;
             color: #1a202c;
             line-height: 1.6;
         }
-        .fresh-header {
+        .dashboard-header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 4rem;
+            padding: 5rem;
             text-align: center;
         }
-        .fresh-header h1 {
-            font-size: 4rem;
-            margin-bottom: 1rem;
+        .dashboard-header h1 {
+            font-size: 5rem;
+            margin-bottom: 1.5rem;
             font-weight: 900;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.3);
         }
-        .fresh-header p {
+        .dashboard-header p {
             opacity: 0.9;
-            font-size: 1.3rem;
-            font-weight: 600;
+            font-size: 1.5rem;
+            font-weight: 700;
         }
-        .fresh-container {
-            max-width: 1600px;
+        .dashboard-wrapper {
+            max-width: 1800px;
             margin: 0 auto;
-            padding: 4rem;
+            padding: 5rem;
         }
-        .fresh-grid {
+        .analytics-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 3rem;
-            margin-bottom: 4rem;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 4rem;
+            margin-bottom: 5rem;
         }
-        .fresh-card {
+        .analytics-card {
             background: white;
-            padding: 3rem;
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            border: 2px solid #e2e8f0;
-            transition: all 0.3s ease;
+            padding: 4rem;
+            border-radius: 25px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.12);
+            border: 3px solid #e2e8f0;
+            transition: all 0.4s ease;
+            position: relative;
+            overflow: hidden;
         }
-        .fresh-card:hover {
-            transform: translateY(-10px);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+        .analytics-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            transition: left 0.5s;
         }
-        .fresh-card.success { border-left: 6px solid #10b981; }
-        .fresh-card.warning { border-left: 6px solid #f59e0b; }
-        .fresh-card.error { border-left: 6px solid #ef4444; }
-        .fresh-card.info { border-left: 6px solid #3b82f6; }
+        .analytics-card:hover::before {
+            left: 100%;
+        }
+        .analytics-card:hover {
+            transform: translateY(-12px);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.18);
+        }
+        .analytics-card.success { border-left: 8px solid #10b981; }
+        .analytics-card.warning { border-left: 8px solid #f59e0b; }
+        .analytics-card.error { border-left: 8px solid #ef4444; }
+        .analytics-card.info { border-left: 8px solid #3b82f6; }
         .card-value {
-            font-size: 3rem;
+            font-size: 3.5rem;
             font-weight: 900;
-            margin-bottom: 1rem;
+            margin-bottom: 1.5rem;
             color: #1a202c;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .card-label {
             color: #4a5568;
-            font-size: 1.2rem;
+            font-size: 1.3rem;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            font-weight: 900;
+        }
+        .dashboard-section {
+            background: white;
+            border-radius: 25px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.12);
+            margin-bottom: 5rem;
+            overflow: hidden;
+            border: 3px solid #e2e8f0;
+        }
+        .section-title {
+            background: linear-gradient(135deg, #f8fafc, #e2e8f0);
+            padding: 3rem 4rem;
+            border-bottom: 3px solid #e2e8f0;
+            font-weight: 900;
+            font-size: 1.8rem;
+            color: #1a202c;
             text-transform: uppercase;
             letter-spacing: 2px;
-            font-weight: 800;
         }
-        .fresh-section {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            margin-bottom: 4rem;
-            overflow: hidden;
-            border: 2px solid #e2e8f0;
+        .section-body {
+            padding: 4rem;
         }
-        .section-header {
-            background: linear-gradient(135deg, #f8fafc, #e2e8f0);
-            padding: 2rem 3rem;
-            border-bottom: 2px solid #e2e8f0;
-            font-weight: 900;
-            font-size: 1.5rem;
-            color: #1a202c;
-        }
-        .section-content {
-            padding: 3rem;
-        }
-        .fresh-table {
+        .data-table {
             width: 100%;
             border-collapse: collapse;
         }
-        .fresh-table th,
-        .fresh-table td {
-            padding: 1.5rem;
+        .data-table th,
+        .data-table td {
+            padding: 2rem;
             text-align: left;
-            border-bottom: 2px solid #e2e8f0;
-            font-weight: 600;
+            border-bottom: 3px solid #e2e8f0;
+            font-weight: 700;
         }
-        .fresh-table th {
+        .data-table th {
             background: linear-gradient(135deg, #f8fafc, #e2e8f0);
             font-weight: 900;
             color: #1a202c;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 2px;
         }
-        .status-success { color: #10b981; font-weight: 900; }
-        .status-failed { color: #ef4444; font-weight: 900; }
-        .status-rate_limited { color: #f59e0b; font-weight: 900; }
-        .fresh-health {
+        .outcome-completed { color: #10b981; font-weight: 900; }
+        .outcome-error { color: #ef4444; font-weight: 900; }
+        .outcome-throttled { color: #f59e0b; font-weight: 900; }
+        .health-indicator {
             width: 100%;
-            height: 12px;
+            height: 15px;
             background: #e2e8f0;
-            border-radius: 6px;
+            border-radius: 8px;
             overflow: hidden;
         }
-        .health-fill {
+        .health-bar {
             height: 100%;
-            transition: width 0.3s ease;
+            transition: width 0.4s ease;
         }
         .health-excellent { background: linear-gradient(135deg, #10b981, #059669); }
         .health-good { background: linear-gradient(135deg, #f59e0b, #d97706); }
         .health-poor { background: linear-gradient(135deg, #ef4444, #dc2626); }
-        .fresh-refresh {
+        .refresh-control {
             position: fixed;
-            bottom: 4rem;
-            right: 4rem;
+            bottom: 5rem;
+            right: 5rem;
             background: linear-gradient(135deg, #4299e1, #3182ce);
             color: white;
             border: none;
-            padding: 1.5rem;
+            padding: 2rem;
             border-radius: 50%;
-            font-size: 2rem;
+            font-size: 2.5rem;
             cursor: pointer;
-            box-shadow: 0 10px 30px rgba(66, 153, 225, 0.4);
-            transition: all 0.3s;
+            box-shadow: 0 15px 35px rgba(66, 153, 225, 0.5);
+            transition: all 0.4s;
         }
-        .fresh-refresh:hover {
-            transform: scale(1.2);
+        .refresh-control:hover {
+            transform: scale(1.3);
         }
         @media (max-width: 768px) {
-            .fresh-container { padding: 2rem; }
-            .fresh-grid { grid-template-columns: 1fr; }
-            .fresh-table { font-size: 0.9rem; }
+            .dashboard-wrapper { padding: 3rem; }
+            .analytics-grid { grid-template-columns: 1fr; }
+            .data-table { font-size: 0.9rem; }
         }
     </style>
 </head>
 <body>
-    <div class="fresh-header">
-        <h1>🚀 Fresh Bot Dashboard</h1>
-        <p>Completely rebuilt monitoring system</p>
+    <div class="dashboard-header">
+        <h1>🚀 Exclusive Bot Dashboard</h1>
+        <p>Brand new monitoring architecture</p>
     </div>
 
-    <div class="fresh-container">
-        <!-- Fresh Metrics -->
-        <div class="fresh-grid">
-            <div class="fresh-card info">
-                <div class="card-value">${metrics.totalRequests.toLocaleString()}</div>
-                <div class="card-label">Total Requests</div>
+    <div class="dashboard-wrapper">
+        <!-- System Analytics -->
+        <div class="analytics-grid">
+            <div class="analytics-card info">
+                <div class="card-value">${analytics.totalProcessed.toLocaleString()}</div>
+                <div class="card-label">Total Processed</div>
             </div>
-            <div class="fresh-card success">
-                <div class="card-value">${metrics.successfulRequests.toLocaleString()}</div>
+            <div class="analytics-card success">
+                <div class="card-value">${analytics.successfulProcessed.toLocaleString()}</div>
                 <div class="card-label">Successful</div>
             </div>
-            <div class="fresh-card error">
-                <div class="card-value">${metrics.failedRequests.toLocaleString()}</div>
-                <div class="card-label">Failed</div>
+            <div class="analytics-card error">
+                <div class="card-value">${analytics.errorProcessed.toLocaleString()}</div>
+                <div class="card-label">Errors</div>
             </div>
-            <div class="fresh-card warning">
-                <div class="card-value">${metrics.rateLimitedRequests.toLocaleString()}</div>
-                <div class="card-label">Rate Limited</div>
+            <div class="analytics-card warning">
+                <div class="card-value">${analytics.throttledProcessed.toLocaleString()}</div>
+                <div class="card-label">Throttled</div>
             </div>
-            <div class="fresh-card info">
-                <div class="card-value">${metrics.averageResponseTime.toFixed(1)}ms</div>
-                <div class="card-label">Avg Response</div>
+            <div class="analytics-card info">
+                <div class="card-value">${analytics.averageDuration.toFixed(1)}ms</div>
+                <div class="card-label">Avg Duration</div>
             </div>
-            <div class="fresh-card success">
-                <div class="card-value">${FreshUtils.formatTimeSpan(metrics.uptime)}</div>
-                <div class="card-label">Fresh Uptime</div>
+            <div class="analytics-card success">
+                <div class="card-value">${ApplicationUtils.formatDurationString(analytics.systemUptime)}</div>
+                <div class="card-label">System Uptime</div>
             </div>
-            <div class="fresh-card info">
-                <div class="card-value">${metrics.currentConnections}</div>
-                <div class="card-label">Active Connections</div>
+            <div class="analytics-card info">
+                <div class="card-value">${analytics.liveConnections}</div>
+                <div class="card-label">Live Connections</div>
             </div>
-            <div class="fresh-card warning">
-                <div class="card-value">${FreshUtils.formatMemorySize(metrics.memoryUsage.heapUsed)}</div>
+            <div class="analytics-card warning">
+                <div class="card-value">${ApplicationUtils.formatBytesSize(analytics.memoryStats.heapUsed)}</div>
                 <div class="card-label">Memory Usage</div>
             </div>
         </div>
 
-        <!-- Single Content Stats -->
-        <div class="fresh-section">
-            <div class="section-header">📊 Single Content Statistics</div>
-            <div class="section-content">
-                <div class="fresh-grid">
-                    <div class="fresh-card success">
-                        <div class="card-value">${contentStats.stats.views.toLocaleString()}</div>
-                        <div class="card-label">Content Views</div>
+        <!-- Exclusive Content Analytics -->
+        <div class="dashboard-section">
+            <div class="section-title">📊 Exclusive Content Analytics</div>
+            <div class="section-body">
+                <div class="analytics-grid">
+                    <div class="analytics-card success">
+                        <div class="card-value">${exclusiveAnalytics.engagement.totalViews.toLocaleString()}</div>
+                        <div class="card-label">Total Views</div>
                     </div>
-                    <div class="fresh-card info">
-                        <div class="card-value">${contentStats.stats.clicks.toLocaleString()}</div>
-                        <div class="card-label">Button Clicks</div>
+                    <div class="analytics-card info">
+                        <div class="card-value">${exclusiveAnalytics.engagement.totalClicks.toLocaleString()}</div>
+                        <div class="card-label">Total Clicks</div>
                     </div>
-                    <div class="fresh-card ${contentStats.active ? "success" : "error"}">
-                        <div class="card-value">${contentStats.active ? "✅" : "❌"}</div>
+                    <div class="analytics-card ${exclusiveAnalytics.isEnabled ? "success" : "error"}">
+                        <div class="card-value">${exclusiveAnalytics.isEnabled ? "✅" : "❌"}</div>
                         <div class="card-label">Content Status</div>
                     </div>
-                    <div class="fresh-card info">
-                        <div class="card-value">${contentStats.id}</div>
+                    <div class="analytics-card info">
+                        <div class="card-value">${exclusiveAnalytics.contentId}</div>
                         <div class="card-label">Content ID</div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Fresh Bot Status -->
-        <div class="fresh-section">
-            <div class="section-header">🤖 Fresh Bot Status</div>
-            <div class="section-content">
-                <div class="fresh-grid">
-                    ${botStatus
+        <!-- Bot Health Status -->
+        <div class="dashboard-section">
+            <div class="section-title">🤖 Bot Health Status</div>
+            <div class="section-body">
+                <div class="analytics-grid">
+                    ${botHealthInfo
                       .map(
                         (bot) => `
-                        <div class="fresh-card">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
-                                <strong style="font-size: 1.3rem; font-weight: 900;">${bot.name}</strong>
-                                <span style="color: ${bot.inCooldown ? "#f59e0b" : "#10b981"}; font-weight: 900; font-size: 1.1rem;">
+                        <div class="analytics-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2.5rem;">
+                                <strong style="font-size: 1.5rem; font-weight: 900;">${bot.identifier}</strong>
+                                <span style="color: ${bot.inCooldown ? "#f59e0b" : "#10b981"}; font-weight: 900; font-size: 1.2rem;">
                                     ${bot.inCooldown ? "⏸️ Cooldown" : "✅ Active"}
                                 </span>
                             </div>
-                            <div class="fresh-health">
-                                <div class="health-fill ${bot.health >= 70 ? "health-excellent" : bot.health >= 40 ? "health-good" : "health-poor"}" 
-                                     style="width: ${bot.health}%"></div>
+                            <div class="health-indicator">
+                                <div class="health-bar ${bot.healthScore >= 70 ? "health-excellent" : bot.healthScore >= 40 ? "health-good" : "health-poor"}" 
+                                     style="width: ${bot.healthScore}%"></div>
                             </div>
-                            <div style="margin-top: 1.5rem; font-size: 1rem; color: #4a5568; font-weight: 600;">
-                                Health: ${bot.health}% | Last used: ${bot.lastUsed ? new Date(bot.lastUsed).toLocaleTimeString() : "Never"}
+                            <div style="margin-top: 2rem; font-size: 1.1rem; color: #4a5568; font-weight: 700;">
+                                Health: ${bot.healthScore}% | Last activity: ${bot.lastActivity ? new Date(bot.lastActivity).toLocaleTimeString() : "Never"}
                             </div>
                         </div>
                     `,
@@ -1237,33 +1293,33 @@ function createFreshDashboard(url: URL): Response {
             </div>
         </div>
 
-        <!-- Fresh Request Logs -->
-        <div class="fresh-section">
-            <div class="section-header">📊 Fresh Request Logs (Last 20)</div>
-            <div class="section-content">
+        <!-- Recent Activities -->
+        <div class="dashboard-section">
+            <div class="section-title">📊 Recent Activities (Last 20)</div>
+            <div class="section-body">
                 <div style="overflow-x: auto;">
-                    <table class="fresh-table">
+                    <table class="data-table">
                         <thead>
                             <tr>
                                 <th>Timestamp</th>
                                 <th>Bot Token</th>
-                                <th>Status</th>
-                                <th>Response Time</th>
-                                <th>Client IP</th>
+                                <th>Outcome</th>
+                                <th>Duration</th>
+                                <th>Source IP</th>
                                 <th>Error Details</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${recentLogs
+                            ${recentActivities
                               .map(
-                                (log) => `
+                                (activity) => `
                                 <tr>
-                                    <td>${new Date(log.timestamp).toLocaleString()}</td>
-                                    <td><code>${log.token.substring(0, 10)}...</code></td>
-                                    <td class="status-${log.status}">${log.status.toUpperCase()}</td>
-                                    <td>${log.responseTime.toFixed(2)}ms</td>
-                                    <td><code>${log.ip || "unknown"}</code></td>
-                                    <td>${log.error || "-"}</td>
+                                    <td>${new Date(activity.createdAt).toLocaleString()}</td>
+                                    <td><code>${activity.botToken.substring(0, 10)}...</code></td>
+                                    <td class="outcome-${activity.outcome}">${activity.outcome.toUpperCase()}</td>
+                                    <td>${activity.duration.toFixed(2)}ms</td>
+                                    <td><code>${activity.sourceIP || "unknown"}</code></td>
+                                    <td>${activity.errorDetails || "-"}</td>
                                 </tr>
                             `,
                               )
@@ -1274,37 +1330,37 @@ function createFreshDashboard(url: URL): Response {
             </div>
         </div>
 
-        <!-- Fresh User Activities -->
-        <div class="fresh-section">
-            <div class="section-header">💬 Fresh User Activities (${serverController.activityBuffer.length} in buffer)</div>
-            <div class="section-content">
+        <!-- User Engagements -->
+        <div class="dashboard-section">
+            <div class="section-title">💬 User Engagements (${appState.engagementQueue.length} in queue)</div>
+            <div class="section-body">
                 <div style="overflow-x: auto;">
-                    <table class="fresh-table">
+                    <table class="data-table">
                         <thead>
                             <tr>
                                 <th>Time</th>
                                 <th>Bot</th>
-                                <th>User</th>
-                                <th>Chat Type</th>
-                                <th>Activity Type</th>
-                                <th>Response Time</th>
+                                <th>Participant</th>
+                                <th>Context Type</th>
+                                <th>Engagement Type</th>
+                                <th>Processing Time</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${serverController.activityBuffer
+                            ${appState.engagementQueue
                               .slice(0, 15)
                               .map(
-                                (activity) => `
+                                (engagement) => `
                                 <tr>
-                                    <td>${new Date(activity.timestamp).toLocaleTimeString()}</td>
-                                    <td>@${activity.botUsername}</td>
+                                    <td>${new Date(engagement.timestamp).toLocaleTimeString()}</td>
+                                    <td>@${engagement.botIdentifier}</td>
                                     <td>
-                                        <div style="font-weight: 700;">${activity.userDetails.fullName}</div>
-                                        <small style="color: #4a5568;">@${activity.userDetails.username} (${activity.userDetails.id})</small>
+                                        <div style="font-weight: 900;">${engagement.participant.displayName}</div>
+                                        <small style="color: #4a5568;">@${engagement.participant.handle} (${engagement.participant.participantId})</small>
                                     </td>
-                                    <td><span style="background: #e2e8f0; padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 700;">${activity.chatDetails.type}</span></td>
-                                    <td><span style="background: #dbeafe; padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 700;">${activity.activityType}</span></td>
-                                    <td>${activity.processingData.responseTime.toFixed(2)}ms</td>
+                                    <td><span style="background: #e2e8f0; padding: 8px 15px; border-radius: 10px; font-size: 0.8rem; font-weight: 900;">${engagement.conversationContext.contextType}</span></td>
+                                    <td><span style="background: #dbeafe; padding: 8px 15px; border-radius: 10px; font-size: 0.8rem; font-weight: 900;">${engagement.engagementType}</span></td>
+                                    <td>${engagement.processingMetrics.processingTime.toFixed(2)}ms</td>
                                 </tr>
                             `,
                               )
@@ -1316,7 +1372,7 @@ function createFreshDashboard(url: URL): Response {
         </div>
     </div>
 
-    <button class="fresh-refresh" onclick="window.location.reload()" title="Refresh Fresh Dashboard">
+    <button class="refresh-control" onclick="window.location.reload()" title="Refresh Exclusive Dashboard">
         🔄
     </button>
 
@@ -1326,7 +1382,7 @@ function createFreshDashboard(url: URL): Response {
         }, 30000);
         
         document.addEventListener('DOMContentLoaded', function() {
-            const refreshBtn = document.querySelector('.fresh-refresh');
+            const refreshBtn = document.querySelector('.refresh-control');
             refreshBtn.addEventListener('click', function() {
                 this.innerHTML = '⏳';
                 this.style.transform = 'rotate(360deg)';
@@ -1341,20 +1397,20 @@ function createFreshDashboard(url: URL): Response {
   })
 }
 
-// Fresh API Stats
-function createFreshStatsAPI(): Response {
-  const metrics = serverController.getServerMetrics()
-  const botStatus = FreshLogBotManager.getBotStatus()
-  const contentStats = FreshContentDelivery.getContentStats()
+// Brand New API Stats
+function generateAPIStats(): Response {
+  const analytics = appState.getAnalytics()
+  const botHealthInfo = EngagementLoggerManager.getBotHealthInfo()
+  const exclusiveAnalytics = ExclusiveContentDelivery.getExclusiveAnalytics()
 
   return new Response(
     JSON.stringify({
-      metrics,
-      botStatus,
-      contentStats,
-      activityBufferSize: serverController.activityBuffer.length,
+      analytics,
+      botHealthInfo,
+      exclusiveAnalytics,
+      engagementQueueSize: appState.engagementQueue.length,
       timestamp: new Date().toISOString(),
-      version: "fresh_v1.0",
+      version: "exclusive_v2.0",
     }),
     {
       headers: {
@@ -1365,7 +1421,7 @@ function createFreshStatsAPI(): Response {
   )
 }
 
-// Fresh Server
+// Brand New Server
 serve({
   port: process.env.PORT || 3000,
 
@@ -1374,14 +1430,14 @@ serve({
     const url = new URL(req.url)
     const method = req.method
     const pathname = url.pathname
-    const userAgent = req.headers.get("user-agent") || "unknown"
-    const clientIP = FreshUtils.getRequestIP(req)
+    const clientInfo = req.headers.get("user-agent") || "unknown"
+    const sourceIP = ApplicationUtils.extractClientIP(req)
 
-    serverController.increaseConnections()
+    appState.addConnection()
 
     try {
-      if (FreshUtils.isRequestRateLimited(clientIP)) {
-        return new Response("Rate limit exceeded", {
+      if (ApplicationUtils.checkThrottleLimit(sourceIP)) {
+        return new Response("Throttle limit exceeded", {
           status: 429,
           headers: { "Retry-After": "60" },
         })
@@ -1391,66 +1447,67 @@ serve({
         const botToken = pathname.split("/bot/")[1]
 
         if (!botToken || !botToken.includes(":")) {
-          FreshRequestLogger.recordRequest({
-            token: botToken || "invalid",
-            status: "failed",
-            responseTime: performance.now() - startTime,
-            error: "Invalid bot token format",
-            userAgent,
-            ip: clientIP,
+          ActivityLogger.recordActivity({
+            botToken: botToken || "invalid",
+            outcome: "error",
+            duration: performance.now() - startTime,
+            errorDetails: "Invalid bot token format",
+            clientInfo,
+            sourceIP,
           })
           return new Response("Invalid bot token format", { status: 400 })
         }
 
         try {
-          const update = (await req.json()) as IncomingUpdate
+          const payload = (await req.json()) as WebhookPayload
 
-          await processFreshUpdate(update, botToken, userAgent, clientIP, startTime)
+          await processWebhookPayload(payload, botToken, clientInfo, sourceIP, startTime)
 
-          FreshRequestLogger.recordRequest({
-            token: botToken,
-            status: "success",
-            responseTime: performance.now() - startTime,
-            userAgent,
-            ip: clientIP,
+          ActivityLogger.recordActivity({
+            botToken,
+            outcome: "completed",
+            duration: performance.now() - startTime,
+            clientInfo,
+            sourceIP,
           })
 
           return new Response("OK", { status: 200 })
         } catch (error: any) {
-          FreshRequestLogger.recordRequest({
-            token: botToken,
-            status: "failed",
-            responseTime: performance.now() - startTime,
-            error: error.message,
-            userAgent,
-            ip: clientIP,
+          ActivityLogger.recordActivity({
+            botToken,
+            outcome: "error",
+            duration: performance.now() - startTime,
+            errorDetails: error.message,
+            clientInfo,
+            sourceIP,
           })
 
-          console.error("❌ Fresh webhook processing error:", error)
+          console.error("❌ Webhook processing error:", error)
           return new Response("OK", { status: 200 })
         }
       }
 
       if (method === "GET" && pathname === "/") {
-        return createFreshStatusPage()
+        return generateStatusPage()
       }
 
       if (method === "GET" && pathname === "/status") {
-        return createFreshDashboard(url)
+        return generateDashboard(url)
       }
 
       if (method === "GET" && pathname === "/api/stats") {
-        return createFreshStatsAPI()
+        return generateAPIStats()
       }
 
       return new Response("Not Found", { status: 404 })
     } finally {
-      serverController.decreaseConnections()
+      appState.removeConnection()
     }
   },
 })
 
-console.log(`🚀 FRESH Telegram Bot Server started on port ${process.env.PORT || 3000}`)
-console.log(`📊 FRESH Dashboard available at: /status?pass=${SERVER_SETTINGS.DASHBOARD_PASSWORD}`)
-console.log(`🔧 FRESH API endpoint available at: /api/stats`)
-console.log(`✨ ONLY ONE CONTENT ITEM ACTIVE - NO OLD ADS POSSIBLE`)
+console.log(`🚀 EXCLUSIVE Telegram Bot Server started on port ${process.env.PORT || 3000}`)
+console.log(`📊 EXCLUSIVE Dashboard available at: /status?pass=${APP_CONFIG.ACCESS_PASSWORD}`)
+console.log(`🔧 EXCLUSIVE API endpoint available at: /api/stats`)
+console.log(`✨ ONLY EXCLUSIVE CONTENT ACTIVE - NO OTHER ADS POSSIBLE`)
+console.log(`🛡️ ZERO EXTERNAL REQUESTS - COMPLETELY ISOLATED`)
