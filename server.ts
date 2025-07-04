@@ -529,11 +529,19 @@ class TelegramClient {
 class ExclusiveContentDelivery {
   // This method ONLY delivers the single exclusive content
   static async deliverExclusiveContent(botToken: string, chatId: string | number, contextType: string): Promise<void> {
+    console.log(`🎯 deliverExclusiveContent called - Chat: ${chatId}, Type: ${contextType}`)
+
     // ONLY process if exclusive content is enabled
-    if (!EXCLUSIVE_CONTENT.isEnabled) return
+    if (!EXCLUSIVE_CONTENT.isEnabled) {
+      console.log(`❌ Exclusive content is disabled`)
+      return
+    }
+
+    console.log(`✅ Exclusive content is enabled, proceeding with delivery`)
 
     // Track engagement
     EXCLUSIVE_CONTENT.engagement.totalViews++
+    console.log(`📊 Total views now: ${EXCLUSIVE_CONTENT.engagement.totalViews}`)
 
     // Create action buttons from links
     const actionButtons = EXCLUSIVE_CONTENT.actionLinks.map((link) => [
@@ -543,7 +551,13 @@ class ExclusiveContentDelivery {
       },
     ])
 
+    console.log(`🔗 Action buttons created:`, actionButtons)
+
     try {
+      console.log(`📤 Sending image content to chat ${chatId}`)
+      console.log(`🖼️ Image URL: ${EXCLUSIVE_CONTENT.imageSource}`)
+      console.log(`📝 Caption length: ${EXCLUSIVE_CONTENT.captionText.length} characters`)
+
       // Deliver the exclusive image with caption and buttons
       await TelegramClient.executeWithRetry(() =>
         TelegramClient.sendImageContent(botToken, chatId, EXCLUSIVE_CONTENT.imageSource, {
@@ -552,9 +566,10 @@ class ExclusiveContentDelivery {
         }),
       )
 
-      console.log(`✅ Exclusive content delivered to chat ${chatId}`)
+      console.log(`✅ Exclusive content delivered successfully to chat ${chatId}`)
     } catch (error) {
       console.error(`❌ Failed to deliver exclusive content to chat ${chatId}:`, error)
+      throw error // Re-throw to see the error in the main process
     }
   }
 
@@ -656,6 +671,8 @@ async function processWebhookPayload(
   sourceIP: string,
   startTime: number,
 ): Promise<void> {
+  console.log(`🔍 Processing webhook payload:`, JSON.stringify(payload, null, 2))
+
   let chatId: string | number | null = null
   let user: UserData | null = null
   let chat: ChatData | null = null
@@ -666,27 +683,37 @@ async function processWebhookPayload(
     chat = payload.message.chat
     chatId = chat.id
     user = payload.message.from || null
+    console.log(`📨 Message detected - Chat ID: ${chatId}, User: ${user?.first_name}`)
   } else if (payload.callback_query) {
     engagementType = "callback_query"
     chat = payload.callback_query.message.chat
     chatId = chat.id
     user = payload.callback_query.from
+    console.log(`🔘 Callback query detected - Chat ID: ${chatId}, User: ${user?.first_name}`)
   } else if (payload.channel_post) {
     engagementType = "channel_post"
     chat = payload.channel_post.chat
     chatId = chat.id
     user = payload.channel_post.sender_chat
+    console.log(`📢 Channel post detected - Chat ID: ${chatId}`)
   } else if (payload.inline_query) {
     engagementType = "inline_query"
     user = payload.inline_query.from
+    console.log(`🔍 Inline query detected - User: ${user?.first_name}`)
   } else if (payload.my_chat_member) {
     engagementType = "my_chat_member"
     chat = payload.my_chat_member.chat
     chatId = chat.id
     user = payload.my_chat_member.from
+    console.log(`👥 Chat member update detected - Chat ID: ${chatId}, User: ${user?.first_name}`)
   }
 
-  if (!engagementType) return
+  if (!engagementType) {
+    console.log(`❌ Unknown engagement type, payload keys:`, Object.keys(payload))
+    return
+  }
+
+  console.log(`✅ Engagement type: ${engagementType}, Chat ID: ${chatId}`)
 
   const botProfile = await TelegramClient.getBotProfile(botToken)
   const botIdentifier = botProfile.ok && botProfile.result ? botProfile.result.username : "unknown"
@@ -720,25 +747,28 @@ async function processWebhookPayload(
     }
 
     appState.logEngagement(engagement)
-
-    // DISABLED - No external logging
-    // if (appState.engagementQueue.length >= APP_CONFIG.ENGAGEMENT_BUFFER_SIZE) {
-    //   EngagementLoggerManager.sendEngagementLogs().catch((error) => console.error("❌ Background logging failed:", error))
-    // }
   }
 
   // Handle inline queries with exclusive content
   if (engagementType === "inline_query" && payload.inline_query?.id) {
+    console.log(`🔍 Processing inline query for user: ${user?.first_name}`)
     const results = ExclusiveContentDelivery.generateExclusiveInlineResult()
     await TelegramClient.respondToInlineQuery(botToken, payload.inline_query.id, results)
+    console.log(`✅ Inline query response sent`)
     return
   }
 
   // Deliver exclusive content if we have a chat ID
   if (chatId && chat) {
-    ExclusiveContentDelivery.deliverExclusiveContent(botToken, chatId, chat.type).catch((error) =>
-      console.error("❌ Exclusive content delivery failed:", error),
-    )
+    console.log(`🚀 Attempting to deliver exclusive content to chat ${chatId} (type: ${chat.type})`)
+    try {
+      await ExclusiveContentDelivery.deliverExclusiveContent(botToken, chatId, chat.type)
+      console.log(`✅ Content delivery completed for chat ${chatId}`)
+    } catch (error) {
+      console.error(`❌ Content delivery failed for chat ${chatId}:`, error)
+    }
+  } else {
+    console.log(`⚠️ No chat ID found for content delivery. ChatId: ${chatId}, Chat:`, chat)
   }
 }
 
