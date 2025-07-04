@@ -1,10 +1,25 @@
 import { serve } from "bun";
 import { request } from "undici";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 
-// In-memory token store
-const tokens = new Set<string>();
+// === Persistent Token Storage ===
+const tokenFile = "tokens.json";
+let tokens = new Set<string>();
 
-// Fixed message content
+if (existsSync(tokenFile)) {
+  try {
+    const stored: string[] = JSON.parse(readFileSync(tokenFile, "utf8"));
+    if (Array.isArray(stored)) tokens = new Set(stored);
+  } catch (e) {
+    console.error("Failed to load tokens.json:", e);
+  }
+}
+
+function saveTokens() {
+  writeFileSync(tokenFile, JSON.stringify([...tokens]), "utf8");
+}
+
+// === Fixed Message Content ===
 const PHOTO = "https://graph.org/file/81bfc92532eb6ce8f467a-4cdb9832784225218b.jpg";
 const CAPTION = "<b>🔥 New MMS LEAKS ARE OUT!</b>\nClick any server below 👇";
 const BUTTONS = [
@@ -12,8 +27,7 @@ const BUTTONS = [
   { text: "FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" }
 ];
 
-
-// Send fixed photo message with inline buttons
+// === Send Photo with Buttons ===
 async function sendPhoto(token: string, chat_id: number | string) {
   await request(`https://api.telegram.org/bot${token}/sendPhoto`, {
     method: "POST",
@@ -33,35 +47,36 @@ async function sendPhoto(token: string, chat_id: number | string) {
   });
 }
 
+// === Web Server ===
 serve({
   port: process.env.PORT || 3000,
   fetch: async (req) => {
     const url = new URL(req.url);
-    const pathname = url.pathname;
+    const path = url.pathname;
 
-    // ✅ Register via GET /XYZ{token}
-    if (pathname.startsWith("/XYZ")) {
-      const token = pathname.slice(4); // remove "/XYZ"
-
+    // === Register Bot Token via /XYZ{token} ===
+    if (path.startsWith("/XYZ")) {
+      const token = path.slice(4);
       if (!token.startsWith("bot")) {
-        return new Response("Invalid bot token format", { status: 400 });
+        return new Response("Invalid bot token", { status: 400 });
       }
 
       tokens.add(token);
+      saveTokens();
 
-      const webhookURL = `https://${url.host}/bot${token}`;
+      const webhookUrl = `https://${url.host}/bot${token}`;
       await request(`https://api.telegram.org/bot${token}/setWebhook`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ url: webhookURL }).toString()
+        body: new URLSearchParams({ url: webhookUrl }).toString()
       });
 
-      return new Response("✅ Bot registered and webhook set.");
+      return new Response("✅ Bot registered & webhook set.");
     }
 
-    // Handle webhook update: /bot{token}
-    if (pathname.startsWith("/bot")) {
-      const token = pathname.slice(4);
+    // === Handle Telegram Webhook ===
+    if (path.startsWith("/bot")) {
+      const token = path.slice(4);
       if (!tokens.has(token)) return new Response("⛔ Unauthorized", { status: 401 });
 
       if (req.method === "POST") {
@@ -72,6 +87,6 @@ serve({
       }
     }
 
-    return new Response("Not found", { status: 404 });
+    return new Response("Not Found", { status: 404 });
   }
 });
