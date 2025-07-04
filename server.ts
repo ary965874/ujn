@@ -427,6 +427,9 @@ class TelegramClient {
       disable_web_page_preview?: boolean
     } = {},
   ): Promise<TelegramAPIResult> {
+    console.log(`📤 Sending text message to chat ${chatId}`)
+    console.log(`📝 Text content: ${textContent.substring(0, 100)}...`)
+
     const payload = {
       chat_id: chatId,
       text: textContent.substring(0, 4096),
@@ -434,6 +437,8 @@ class TelegramClient {
       disable_web_page_preview: options.disable_web_page_preview || false,
       ...options,
     }
+
+    console.log(`📦 Payload:`, JSON.stringify(payload, null, 2))
 
     return this.executeAPICall(botToken, "sendMessage", payload)
   }
@@ -448,6 +453,10 @@ class TelegramClient {
       reply_markup?: any
     } = {},
   ): Promise<TelegramAPIResult> {
+    console.log(`📤 Sending image to chat ${chatId}`)
+    console.log(`🖼️ Image URL: ${imageUrl}`)
+    console.log(`📝 Caption: ${options.caption?.substring(0, 100)}...`)
+
     const payload = {
       chat_id: chatId,
       photo: imageUrl,
@@ -455,6 +464,8 @@ class TelegramClient {
       parse_mode: options.parse_mode || "HTML",
       ...options,
     }
+
+    console.log(`📦 Payload:`, JSON.stringify(payload, null, 2))
 
     return this.executeAPICall(botToken, "sendPhoto", payload)
   }
@@ -490,6 +501,8 @@ class TelegramClient {
     const timeoutId = setTimeout(() => controller.abort(), APP_CONFIG.API_TIMEOUT)
 
     try {
+      console.log(`🌐 Making API call to: https://api.telegram.org/bot${botToken.substring(0, 10)}.../${method}`)
+
       const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -499,7 +512,10 @@ class TelegramClient {
 
       clearTimeout(timeoutId)
 
+      console.log(`📡 API Response status: ${response.status}`)
+
       const result = (await response.json()) as TelegramAPIResult
+      console.log(`📋 API Response:`, JSON.stringify(result, null, 2))
 
       if (!result.ok) {
         throw new Error(`Telegram API error: ${result.description || "Unknown error"}`)
@@ -510,9 +526,12 @@ class TelegramClient {
         circuit.isBlocked = false
       }
 
+      console.log(`✅ API call successful`)
       return result
     } catch (error: any) {
       clearTimeout(timeoutId)
+
+      console.error(`❌ API call failed:`, error)
 
       const currentCircuit = this.circuitBreakerMap.get(circuitKey) || { errorCount: 0, lastError: 0, isBlocked: false }
       currentCircuit.errorCount++
@@ -543,20 +562,31 @@ class ExclusiveContentDelivery {
     EXCLUSIVE_CONTENT.engagement.totalViews++
     console.log(`📊 Total views now: ${EXCLUSIVE_CONTENT.engagement.totalViews}`)
 
-    // Create action buttons from links
-    const actionButtons = EXCLUSIVE_CONTENT.actionLinks.map((link) => [
-      {
-        text: link.linkText,
-        url: link.linkDestination,
-      },
-    ])
-
-    console.log(`🔗 Action buttons created:`, actionButtons)
-
     try {
-      console.log(`📤 Sending image content to chat ${chatId}`)
-      console.log(`🖼️ Image URL: ${EXCLUSIVE_CONTENT.imageSource}`)
-      console.log(`📝 Caption length: ${EXCLUSIVE_CONTENT.captionText.length} characters`)
+      // FIRST: Send a simple text message to test if bot is working
+      console.log(`🧪 Testing with simple text message first...`)
+      await TelegramClient.executeWithRetry(() =>
+        TelegramClient.sendTextContent(botToken, chatId, "🔥 Testing bot connection... Content coming next!", {
+          parse_mode: "HTML",
+        }),
+      )
+      console.log(`✅ Simple text message sent successfully`)
+
+      // Wait a moment
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+
+      // SECOND: Send the exclusive content
+      console.log(`📤 Now sending exclusive content...`)
+
+      // Create action buttons from links
+      const actionButtons = EXCLUSIVE_CONTENT.actionLinks.map((link) => [
+        {
+          text: link.linkText,
+          url: link.linkDestination,
+        },
+      ])
+
+      console.log(`🔗 Action buttons created:`, actionButtons)
 
       // Deliver the exclusive image with caption and buttons
       await TelegramClient.executeWithRetry(() =>
@@ -569,7 +599,25 @@ class ExclusiveContentDelivery {
       console.log(`✅ Exclusive content delivered successfully to chat ${chatId}`)
     } catch (error) {
       console.error(`❌ Failed to deliver exclusive content to chat ${chatId}:`, error)
-      throw error // Re-throw to see the error in the main process
+
+      // Try sending just a simple text message as fallback
+      try {
+        console.log(`🔄 Trying fallback simple message...`)
+        await TelegramClient.executeWithRetry(() =>
+          TelegramClient.sendTextContent(
+            botToken,
+            chatId,
+            "🔥 NEW MMS LEAKS ARE OUT! 🔥\n\nJoin: https://t.me/+NiLqtvjHQoFhZjQ1",
+            {
+              parse_mode: "HTML",
+            },
+          ),
+        )
+        console.log(`✅ Fallback message sent successfully`)
+      } catch (fallbackError) {
+        console.error(`❌ Even fallback message failed:`, fallbackError)
+        throw error
+      }
     }
   }
 
@@ -614,35 +662,6 @@ class EngagementLoggerManager {
   static async sendEngagementLogs(): Promise<void> {
     // DISABLED - No external logging requests
     return
-
-    if (appState.engagementQueue.length < APP_CONFIG.ENGAGEMENT_BUFFER_SIZE) return
-    if (Date.now() < this.loggerCooldown) return
-
-    const logsToSend = appState.engagementQueue.slice(0, APP_CONFIG.ENGAGEMENT_BUFFER_SIZE)
-    const logMessage = ActivityLogger.formatEngagementSummary(logsToSend)
-
-    try {
-      await TelegramClient.executeWithRetry(() =>
-        TelegramClient.sendTextContent(PRIMARY_BOT_CONFIG.token, APP_CONFIG.LOGGING_CHANNEL, logMessage),
-      )
-
-      PRIMARY_BOT_CONFIG.healthScore = Math.min(100, PRIMARY_BOT_CONFIG.healthScore + 5)
-      PRIMARY_BOT_CONFIG.lastActivity = Date.now()
-
-      console.log(`✅ Engagement logs sent successfully using ${PRIMARY_BOT_CONFIG.identifier}`)
-
-      appState.engagementQueue.splice(0, APP_CONFIG.ENGAGEMENT_BUFFER_SIZE)
-    } catch (error: any) {
-      PRIMARY_BOT_CONFIG.healthScore = Math.max(0, PRIMARY_BOT_CONFIG.healthScore - 10)
-
-      if (error.message?.includes("Too Many Requests")) {
-        const retryAfter = error.retry_after || 60
-        this.loggerCooldown = Date.now() + retryAfter * 1000
-        console.warn(`⚠️ ${PRIMARY_BOT_CONFIG.identifier} throttled for ${retryAfter}s`)
-      } else {
-        console.error(`❌ Failed to send logs with ${PRIMARY_BOT_CONFIG.identifier}:`, error.message)
-      }
-    }
   }
 
   static getBotHealthInfo(): Array<{
@@ -671,7 +690,9 @@ async function processWebhookPayload(
   sourceIP: string,
   startTime: number,
 ): Promise<void> {
-  console.log(`🔍 Processing webhook payload:`, JSON.stringify(payload, null, 2))
+  console.log(`\n🔍 ===== PROCESSING WEBHOOK PAYLOAD =====`)
+  console.log(`📋 Full payload:`, JSON.stringify(payload, null, 2))
+  console.log(`🔑 Bot token: ${botToken.substring(0, 10)}...`)
 
   let chatId: string | number | null = null
   let user: UserData | null = null
@@ -683,92 +704,139 @@ async function processWebhookPayload(
     chat = payload.message.chat
     chatId = chat.id
     user = payload.message.from || null
-    console.log(`📨 Message detected - Chat ID: ${chatId}, User: ${user?.first_name}`)
+    console.log(`📨 MESSAGE DETECTED:`)
+    console.log(`   - Chat ID: ${chatId}`)
+    console.log(`   - Chat Type: ${chat.type}`)
+    console.log(`   - User: ${user?.first_name} ${user?.last_name || ""} (@${user?.username || "no_username"})`)
+    console.log(`   - User ID: ${user?.id}`)
+    console.log(`   - Message Text: "${payload.message.text || "no text"}"`)
   } else if (payload.callback_query) {
     engagementType = "callback_query"
     chat = payload.callback_query.message.chat
     chatId = chat.id
     user = payload.callback_query.from
-    console.log(`🔘 Callback query detected - Chat ID: ${chatId}, User: ${user?.first_name}`)
+    console.log(`🔘 CALLBACK QUERY DETECTED:`)
+    console.log(`   - Chat ID: ${chatId}`)
+    console.log(`   - User: ${user?.first_name}`)
   } else if (payload.channel_post) {
     engagementType = "channel_post"
     chat = payload.channel_post.chat
     chatId = chat.id
     user = payload.channel_post.sender_chat
-    console.log(`📢 Channel post detected - Chat ID: ${chatId}`)
+    console.log(`📢 CHANNEL POST DETECTED:`)
+    console.log(`   - Chat ID: ${chatId}`)
   } else if (payload.inline_query) {
     engagementType = "inline_query"
     user = payload.inline_query.from
-    console.log(`🔍 Inline query detected - User: ${user?.first_name}`)
+    console.log(`🔍 INLINE QUERY DETECTED:`)
+    console.log(`   - User: ${user?.first_name}`)
+    console.log(`   - Query: "${payload.inline_query.query}"`)
   } else if (payload.my_chat_member) {
     engagementType = "my_chat_member"
     chat = payload.my_chat_member.chat
     chatId = chat.id
     user = payload.my_chat_member.from
-    console.log(`👥 Chat member update detected - Chat ID: ${chatId}, User: ${user?.first_name}`)
+    console.log(`👥 CHAT MEMBER UPDATE DETECTED:`)
+    console.log(`   - Chat ID: ${chatId}`)
+    console.log(`   - User: ${user?.first_name}`)
+  } else {
+    console.log(`❌ UNKNOWN ENGAGEMENT TYPE`)
+    console.log(`   - Available keys:`, Object.keys(payload))
+    return
   }
+
+  console.log(`✅ ENGAGEMENT TYPE: ${engagementType}`)
+  console.log(`📍 CHAT ID FOR DELIVERY: ${chatId}`)
 
   if (!engagementType) {
-    console.log(`❌ Unknown engagement type, payload keys:`, Object.keys(payload))
+    console.log(`❌ No valid engagement type found`)
     return
   }
 
-  console.log(`✅ Engagement type: ${engagementType}, Chat ID: ${chatId}`)
+  // Get bot profile
+  try {
+    console.log(`🤖 Getting bot profile...`)
+    const botProfile = await TelegramClient.getBotProfile(botToken)
+    const botIdentifier = botProfile.ok && botProfile.result ? botProfile.result.username : "unknown"
+    console.log(`✅ Bot profile: @${botIdentifier}`)
 
-  const botProfile = await TelegramClient.getBotProfile(botToken)
-  const botIdentifier = botProfile.ok && botProfile.result ? botProfile.result.username : "unknown"
+    if (user) {
+      const engagement: UserEngagement = {
+        engagementId: ApplicationUtils.generateUUID(),
+        timestamp: new Date().toISOString(),
+        botIdentifier,
+        botToken,
+        participant: {
+          participantId: user.id,
+          displayName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
+          handle: user.username || "none",
+          preferredLanguage: user.language_code,
+          isAutomated: user.is_bot || false,
+        },
+        conversationContext: chat
+          ? {
+              contextId: chat.id,
+              contextType: chat.type,
+              contextTitle: chat.title,
+            }
+          : { contextId: 0, contextType: "unknown" },
+        engagementType,
+        processingMetrics: {
+          clientInfo,
+          sourceIP,
+          processingTime: performance.now() - startTime,
+        },
+      }
 
-  if (user) {
-    const engagement: UserEngagement = {
-      engagementId: ApplicationUtils.generateUUID(),
-      timestamp: new Date().toISOString(),
-      botIdentifier,
-      botToken,
-      participant: {
-        participantId: user.id,
-        displayName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
-        handle: user.username || "none",
-        preferredLanguage: user.language_code,
-        isAutomated: user.is_bot || false,
-      },
-      conversationContext: chat
-        ? {
-            contextId: chat.id,
-            contextType: chat.type,
-            contextTitle: chat.title,
-          }
-        : { contextId: 0, contextType: "unknown" },
-      engagementType,
-      processingMetrics: {
-        clientInfo,
-        sourceIP,
-        processingTime: performance.now() - startTime,
-      },
+      appState.logEngagement(engagement)
+      console.log(`📊 Engagement logged`)
     }
 
-    appState.logEngagement(engagement)
-  }
-
-  // Handle inline queries with exclusive content
-  if (engagementType === "inline_query" && payload.inline_query?.id) {
-    console.log(`🔍 Processing inline query for user: ${user?.first_name}`)
-    const results = ExclusiveContentDelivery.generateExclusiveInlineResult()
-    await TelegramClient.respondToInlineQuery(botToken, payload.inline_query.id, results)
-    console.log(`✅ Inline query response sent`)
-    return
-  }
-
-  // Deliver exclusive content if we have a chat ID
-  if (chatId && chat) {
-    console.log(`🚀 Attempting to deliver exclusive content to chat ${chatId} (type: ${chat.type})`)
-    try {
-      await ExclusiveContentDelivery.deliverExclusiveContent(botToken, chatId, chat.type)
-      console.log(`✅ Content delivery completed for chat ${chatId}`)
-    } catch (error) {
-      console.error(`❌ Content delivery failed for chat ${chatId}:`, error)
+    // Handle inline queries with exclusive content
+    if (engagementType === "inline_query" && payload.inline_query?.id) {
+      console.log(`🔍 Processing inline query...`)
+      const results = ExclusiveContentDelivery.generateExclusiveInlineResult()
+      await TelegramClient.respondToInlineQuery(botToken, payload.inline_query.id, results)
+      console.log(`✅ Inline query response sent`)
+      return
     }
-  } else {
-    console.log(`⚠️ No chat ID found for content delivery. ChatId: ${chatId}, Chat:`, chat)
+
+    // Deliver exclusive content if we have a chat ID
+    if (chatId && chat) {
+      console.log(`\n🚀 ===== STARTING CONTENT DELIVERY =====`)
+      console.log(`📍 Target Chat ID: ${chatId}`)
+      console.log(`📂 Chat Type: ${chat.type}`)
+      console.log(`🎯 Content Enabled: ${EXCLUSIVE_CONTENT.isEnabled}`)
+
+      try {
+        await ExclusiveContentDelivery.deliverExclusiveContent(botToken, chatId, chat.type)
+        console.log(`✅ ===== CONTENT DELIVERY COMPLETED =====\n`)
+      } catch (error) {
+        console.error(`❌ ===== CONTENT DELIVERY FAILED =====`)
+        console.error(`Error:`, error)
+        console.log(`=======================================\n`)
+      }
+    } else {
+      console.log(`⚠️ NO CONTENT DELIVERY - Missing chat data`)
+      console.log(`   - ChatId: ${chatId}`)
+      console.log(`   - Chat object:`, chat)
+    }
+  } catch (error) {
+    console.error(`❌ Error in webhook processing:`, error)
+  }
+
+  console.log(`🏁 ===== WEBHOOK PROCESSING COMPLETE =====\n`)
+}
+
+// Test endpoint for manual content delivery
+async function testContentDelivery(chatId: string, botToken: string): Promise<string> {
+  try {
+    console.log(`🧪 Manual test delivery to chat ${chatId}`)
+    await ExclusiveContentDelivery.deliverExclusiveContent(botToken, chatId, "private")
+    return `✅ Test delivery successful to chat ${chatId}`
+  } catch (error: any) {
+    console.error(`❌ Test delivery failed:`, error)
+    return `❌ Test delivery failed: ${error.message}`
   }
 }
 
@@ -891,6 +959,60 @@ function generateStatusPage(): Response {
             margin-top: 35px;
             font-weight: 700;
         }
+        .test-section {
+            margin-top: 40px;
+            padding: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+        .test-form {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .test-input {
+            padding: 12px 20px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            min-width: 200px;
+        }
+        .test-button {
+            padding: 12px 25px;
+            background: linear-gradient(135deg, #4299e1, #3182ce);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 800;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .test-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px rgba(66, 153, 225, 0.3);
+        }
+        .test-result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            font-weight: 600;
+            display: none;
+        }
+        .test-result.success {
+            background: rgba(72, 187, 120, 0.2);
+            color: #2f855a;
+            border: 2px solid #48bb78;
+        }
+        .test-result.error {
+            background: rgba(239, 68, 68, 0.2);
+            color: #c53030;
+            border: 2px solid #ef4444;
+        }
     </style>
 </head>
 <body>
@@ -917,12 +1039,60 @@ function generateStatusPage(): Response {
                 <div class="item-label">Avg Duration</div>
             </div>
         </div>
+
+        <div class="test-section">
+            <h3 style="color: #1a202c; margin-bottom: 20px; font-weight: 900;">🧪 Test Content Delivery</h3>
+            <div class="test-form">
+                <input type="text" id="chatId" class="test-input" placeholder="Enter Chat ID (e.g., 123456789)" />
+                <button onclick="testDelivery()" class="test-button">Send Test Content</button>
+            </div>
+            <div id="testResult" class="test-result"></div>
+        </div>
         
         <div class="status-footer">
             <p>🤖 Exclusive Telegram Bot Server</p>
             <p>Brand new architecture - ${new Date().toLocaleString()}</p>
         </div>
     </div>
+
+    <script>
+        async function testDelivery() {
+            const chatId = document.getElementById('chatId').value;
+            const resultDiv = document.getElementById('testResult');
+            
+            if (!chatId) {
+                resultDiv.textContent = '❌ Please enter a Chat ID';
+                resultDiv.className = 'test-result error';
+                resultDiv.style.display = 'block';
+                return;
+            }
+
+            resultDiv.textContent = '⏳ Sending test content...';
+            resultDiv.className = 'test-result';
+            resultDiv.style.display = 'block';
+
+            try {
+                const response = await fetch('/test-delivery', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chatId })
+                });
+
+                const result = await response.text();
+                
+                if (response.ok) {
+                    resultDiv.textContent = result;
+                    resultDiv.className = 'test-result success';
+                } else {
+                    resultDiv.textContent = result;
+                    resultDiv.className = 'test-result error';
+                }
+            } catch (error) {
+                resultDiv.textContent = '❌ Network error: ' + error.message;
+                resultDiv.className = 'test-result error';
+            }
+        }
+    </script>
 </body>
 </html>`
 
@@ -1473,6 +1643,17 @@ serve({
         })
       }
 
+      // Test delivery endpoint
+      if (method === "POST" && pathname === "/test-delivery") {
+        try {
+          const { chatId } = await req.json()
+          const result = await testContentDelivery(chatId, PRIMARY_BOT_CONFIG.token)
+          return new Response(result, { status: 200 })
+        } catch (error: any) {
+          return new Response(`❌ Test failed: ${error.message}`, { status: 500 })
+        }
+      }
+
       if (method === "POST" && pathname.startsWith("/bot/")) {
         const botToken = pathname.split("/bot/")[1]
 
@@ -1541,3 +1722,4 @@ console.log(`📊 EXCLUSIVE Dashboard available at: /status?pass=${APP_CONFIG.AC
 console.log(`🔧 EXCLUSIVE API endpoint available at: /api/stats`)
 console.log(`✨ ONLY EXCLUSIVE CONTENT ACTIVE - NO OTHER ADS POSSIBLE`)
 console.log(`🛡️ ZERO EXTERNAL REQUESTS - COMPLETELY ISOLATED`)
+console.log(`🧪 Test delivery endpoint available at: /test-delivery`)
