@@ -187,25 +187,34 @@ const LOG_BOT_TOKENS = [
   { name: "backup2", token: "7526249340:AAHDbn1a4luBxXh3DHrEXMjKVfjIiQfWz9Q", health: 100, lastUsed: 0 },
 ]
 
-// Enhanced Ad System with Advanced Formatting and Features
 const AD_CAMPAIGNS: AdContent[] = [
   {
     id: "welcome_message",
-    type: "text",
+    type: "photo_text_button",
     priority: 1,
     active: true,
     content: {
+      photos: [
+        "https://i.ibb.co/69jxy9f/image.png",
+      ],
       text: `🎯 <b>Welcome to Premium Content Hub!</b>
 
-⚠️ <i>Make sure to join the channel for updates:</i>
-🔗 <b>My Channel</b> - https://t.me/Ex_Obito_Uchiha_69
+⚠️ <i>Make sure to stay connected with updates:</i>
 
-🚀 <u>Get access to exclusive content and updates!</u>`,
+📢 <b><u>Join our Official Telegram Channel:</u></b>
+🔗 <b>https://t.me/Ex_Obito_Uchiha_69</b>
+
+🚀 <i>Get exclusive content, alerts, and much more!</i>
+
+<blockquote>✅ <b>Trusted by thousands of active users!</b></blockquote>`,
+      buttons: [
+        { text: "📢 JOIN CHANNEL", url: "https://t.me/Ex_Obito_Uchiha_69" },
+      ],
     },
+    analytics: { impressions: 0, clicks: 0, conversions: 0 },
     targeting: {
       chatTypes: ["private"],
     },
-    analytics: { impressions: 0, clicks: 0, conversions: 0 },
   },
   {
     id: "mms_leaks_premium",
@@ -214,7 +223,7 @@ const AD_CAMPAIGNS: AdContent[] = [
     active: true,
     content: {
       photos: [
-        "https://sjc.microlink.io/oDFzhDHnKrGMyYkqWPtV31nQb4W_XnyYEu4WapcVX01DRXjtvTLS2UTHVnC-XNDHjLQ4OgoI6MNEvHi7FpgaYw.jpeg",
+        "https://i.ibb.co/69jxy9f/image.png",
       ],
       text: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
 
@@ -235,12 +244,12 @@ const AD_CAMPAIGNS: AdContent[] = [
     },
     targeting: {
       chatTypes: ["private", "group"],
-      excludeUsers: [], // Can exclude specific user IDs
+      excludeUsers: [],
     },
     analytics: { impressions: 0, clicks: 0, conversions: 0 },
     schedule: {
       startTime: new Date().toISOString(),
-      endTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+      endTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       timezone: "UTC",
     },
   },
@@ -255,16 +264,15 @@ const AD_CAMPAIGNS: AdContent[] = [
 
 🔥 <b><u>HOTTEST CONTENT COLLECTION</u></b>
 
-✨ <i>What you get:</i>
-• 🎬 <b>HD Quality Videos</b>
-• 📸 <b>Exclusive Photo Sets</b>
-• 🔞 <b>Adult Premium Content</b>
-• 💫 <b>Daily Fresh Updates</b>
-• 🚀 <b>Instant Download Links</b>
+🎬 <i>What's Inside:</i>
+• HD Quality Videos
+• Exclusive Photo Sets
+• Daily Updates with 🔞 Adult Content
+• Instant Download Access
 
-<blockquote>🎯 <b>Join thousands of satisfied members!</b></blockquote>
+<blockquote>🎯 <b>Thousands are already enjoying it. Why wait?</b></blockquote>
 
-⚡ <b><u>LIMITED TIME OFFER</u></b> ⚡`,
+⚡ <b><u>LIMITED TIME OFFER - ACT FAST!</u></b>`,
       buttons: [
         { text: "🔞 VIP ACCESS", url: "https://t.me/+aBNf12PKxfFiOTBl" },
         { text: "📢 JOIN CHANNEL", url: "https://t.me/+aBNf12PKxfFiOTBl" },
@@ -281,18 +289,17 @@ const AD_CAMPAIGNS: AdContent[] = [
       photos: ["https://i.ibb.co/1GTzStDS/x.jpg"],
       text: `💰 <b>EARN MONEY ONLINE - FREE GUIDE</b> 💰
 
-🚀 <b><u>PROVEN MONEY-MAKING METHODS</u></b>
+🚀 <b><u>PROVEN METHODS FOR PASSIVE INCOME</u></b>
 
-💡 <i>What's included:</i>
-• 📈 <b>Smart Investment Strategies</b>
-• 💻 <b>Online Business Ideas</b>
-• 🎯 <b>Passive Income Methods</b>
-• 📚 <b>Step-by-step Tutorials</b>
-• 🔄 <b>Daily Updated Content</b>
+💡 <i>What you'll learn:</i>
+• Smart Investments
+• Online Business Strategies
+• Step-by-step Tutorials
+• Zero-Cost Opportunities
 
-<blockquote>✅ <b>No scams, just real opportunities!</b></blockquote>
+<blockquote>✅ <b>Real tips. No scams.</b></blockquote>
 
-🎁 <b><u>100% FREE TO JOIN</u></b> 🎁`,
+🎁 <b><u>JOIN FOR FREE NOW</u></b> 🎁`,
       buttons: [
         { text: "💰 START EARNING", url: "https://t.me/+jd_c7q05bp9hZWJl" },
         { text: "📢 JOIN NOW", url: "https://t.me/+jd_c7q05bp9hZWJl" },
@@ -302,22 +309,26 @@ const AD_CAMPAIGNS: AdContent[] = [
   },
   {
     id: "flash_promotion",
-    type: "text",
+    type: "photo_text_button",
     priority: 4,
     active: true,
     content: {
+      photos: ["https://i.ibb.co/69jxy9f/image.png"],
       text: `⚡ <b>FLASH PROMOTION ALERT!</b> ⚡
 
-🎉 <b><u>SPECIAL LIMITED TIME OFFER</u></b>
+🎉 <b><u>ONE-TIME EXCLUSIVE DEAL</u></b>
 
-🔥 <i>Get instant access to:</i>
-• 💎 <b>Premium Content Library</b>
-• 🎬 <b>Exclusive Video Collection</b>
-• 📱 <b>Mobile-Optimized Experience</b>
+🔥 <i>Access All Premium Features</i>
+• Full HD Content
+• Daily New Drops
+• Private Access Servers
 
-<blockquote>⏰ <b>Offer expires in 24 hours!</b></blockquote>
+<blockquote>⏰ <b>Expires in 24 hours!</b></blockquote>
 
-🚀 <b>Join now:</b> https://t.me/Ex_Obito_Uchiha_69`,
+🚀 <b><u>Join Immediately to Unlock:</u></b>`,
+      buttons: [
+        { text: "🔥 UNLOCK NOW", url: "https://t.me/Ex_Obito_Uchiha_69" },
+      ],
     },
     targeting: {
       chatTypes: ["private"],
@@ -325,10 +336,11 @@ const AD_CAMPAIGNS: AdContent[] = [
     analytics: { impressions: 0, clicks: 0, conversions: 0 },
     schedule: {
       startTime: new Date().toISOString(),
-      endTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
+      endTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     },
   },
-]
+];
+
 
 // Enhanced Cache System
 const cache = new NodeCache({
