@@ -57,8 +57,9 @@ serve({
     // === Register Bot Token via /XYZ{token} ===
     if (path.startsWith("/XYZ")) {
       const token = path.slice(4);
-      if (!token.startsWith("bot")) {
-        return new Response("Invalid bot token", { status: 400 });
+     if (!token || token.length < 30) {
+  return new Response("Invalid bot token", { status: 400 });
+
       }
 
       tokens.add(token);
