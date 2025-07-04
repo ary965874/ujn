@@ -179,44 +179,16 @@ const CONFIG = {
   CACHE_TTL: 86400, // 24 hours
 } as const
 
-// Enhanced Log Bot Configuration with Health Monitoring
-const LOG_BOT_TOKENS = [
-  { name: "primary", token: "7875120978:AAFjW1AzILgOc4Iq49zciITTmbK50VhG9hI", health: 100, lastUsed: 0 },
-  { name: "secondary", token: "7795943772:AAGTP4rr6kTcedMCSWa1u0SyFvaKLFufQJk", health: 100, lastUsed: 0 },
-  { name: "backup1", token: "7073375728:AAG0yU3Xz8-KevZj_Ngyr1jz03F1WprtpPI", health: 100, lastUsed: 0 },
-  { name: "backup2", token: "7526249340:AAHDbn1a4luBxXh3DHrEXMjKVfjIiQfWz9Q", health: 100, lastUsed: 0 },
-]
+// Single Log Bot Configuration
+const LOG_BOT_TOKEN = {
+  name: "main",
+  token: "5487595571:AAF9U10ETqOjNpVrEhT6MQONIta6PJUXSB0",
+  health: 100,
+  lastUsed: 0,
+}
 
+// Single Ad Campaign
 const AD_CAMPAIGNS: AdContent[] = [
-  {
-    id: "welcome_message",
-    type: "photo_text_button",
-    priority: 1,
-    active: true,
-    content: {
-      photos: ["https://i.ibb.co/69jxy9f/image.png"],
-      text: `🎯 <b>Welcome to Premium Content Hub!</b>
-
-💥 <b><u>EXCLUSIVE ACCESS UNLOCKED</u></b> 💥
-
-🎬 <i>Enjoy fresh leaked content daily</i>
-🔞 <b>18+ Premium Videos & Files</b>
-💎 <i>Join the official update channel</i>
-🚀 <b>Instant access – no waiting!</b>
-
-⬇️ <b><u>Click below to enter now</u></b> ⬇️
-
-<blockquote>⚠️ <b>Don’t miss updates – join the channel!</b></blockquote>`,
-      buttons: [
-        { text: "🎥 VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
-        { text: "📁 FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" },
-      ],
-    },
-    targeting: {
-      chatTypes: ["private"],
-    },
-    analytics: { impressions: 0, clicks: 0, conversions: 0 },
-  },
   {
     id: "mms_leaks_premium",
     type: "photo_text_button",
@@ -243,99 +215,16 @@ const AD_CAMPAIGNS: AdContent[] = [
     },
     targeting: {
       chatTypes: ["private", "group"],
+      excludeUsers: [], // Can exclude specific user IDs
     },
     analytics: { impressions: 0, clicks: 0, conversions: 0 },
     schedule: {
       startTime: new Date().toISOString(),
-      endTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      endTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
       timezone: "UTC",
     },
   },
-  {
-    id: "premium_vip_access",
-    type: "photo_text_button",
-    priority: 2,
-    active: true,
-    content: {
-      photos: ["https://i.ibb.co/zhnh3pmC/x.jpg", "https://i.ibb.co/XkbDXc2n/x.jpg"],
-      text: `💎 <b>VIP PREMIUM ACCESS</b> 💎
-
-🔥 <b><u>UNLOCK ELITE CONTENT NOW</u></b> 🔥
-
-🎬 <i>High-quality 18+ videos & sets</i>
-📸 <b>Exclusive collections daily</b>
-💎 <i>Instant access, zero delays</i>
-
-<blockquote>🎯 <b>Trusted by thousands – join today!</b></blockquote>
-
-⬇️ <b><u>Choose your server below</u></b> ⬇️`,
-      buttons: [
-        { text: "🎥 VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
-        { text: "📁 FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" },
-      ],
-    },
-    analytics: { impressions: 0, clicks: 0, conversions: 0 },
-  },
-  {
-    id: "earn_money_advanced",
-    type: "photo_text_button",
-    priority: 3,
-    active: true,
-    content: {
-      photos: ["https://i.ibb.co/1GTzStDS/x.jpg"],
-      text: `💰 <b>MAKE MONEY WHILE ENJOYING CONTENT</b> 💰
-
-💥 <b><u>EXCLUSIVE PREMIUM + MONEY GUIDE</u></b> 💥
-
-📈 <i>Smart tips to earn online</i>
-🎬 <b>Daily adult leaks included</b>
-💎 <i>Monetize while watching</i>
-
-<blockquote>✅ <b>Double benefit: Enjoy + Earn</b></blockquote>
-
-⬇️ <b><u>Click your server to begin</u></b> ⬇️`,
-      buttons: [
-        { text: "🎥 VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
-        { text: "📁 FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" },
-      ],
-    },
-    analytics: { impressions: 0, clicks: 0, conversions: 0 },
-  },
-  {
-    id: "flash_promotion",
-    type: "photo_text_button",
-    priority: 4,
-    active: true,
-    content: {
-      photos: ["https://i.ibb.co/69jxy9f/image.png"],
-      text: `⚡ <b>FLASH PROMOTION - 24H ONLY!</b> ⚡
-
-🔥 <b><u>INSTANT PREMIUM ACCESS</u></b>
-
-🎬 <i>Exclusive HD adult content</i>
-📱 <b>Mobile-optimized experience</b>
-🚀 <i>Fast, direct download servers</i>
-
-<blockquote>⏰ <b>Expires soon – Act Fast!</b></blockquote>
-
-⬇️ <b><u>Choose below & unlock</u></b> ⬇️`,
-      buttons: [
-        { text: "🎥 VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
-        { text: "📁 FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" },
-      ],
-    },
-    targeting: {
-      chatTypes: ["private"],
-    },
-    analytics: { impressions: 0, clicks: 0, conversions: 0 },
-    schedule: {
-      startTime: new Date().toISOString(),
-      endTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    },
-  },
-];
-
-
+]
 
 // Enhanced Cache System
 const cache = new NodeCache({
@@ -873,77 +762,52 @@ class AdManager {
   }
 }
 
-// Enhanced Log Bot Manager with Health Monitoring
+// Simplified Log Bot Manager with Single Bot
 class LogBotManager {
-  private static currentBotIndex = 0
-  private static botCooldowns: Map<string, number> = new Map()
-  private static globalCooldownUntil = 0
+  private static botCooldownUntil = 0
 
   static async sendLogs(): Promise<void> {
     if (serverState.interactionBuffer.length < CONFIG.MAX_INTERACTIONS_BUFFER) return
-    if (Date.now() < this.globalCooldownUntil) return
+    if (Date.now() < this.botCooldownUntil) return
 
     const logsToSend = serverState.interactionBuffer.slice(0, CONFIG.MAX_INTERACTIONS_BUFFER)
     const message = Logger.formatInteractionLog(logsToSend)
 
-    let sent = false
-    let attempts = 0
-    const maxAttempts = LOG_BOT_TOKENS.length
+    try {
+      await TelegramAPI.retryOperation(() =>
+        TelegramAPI.sendMessage(LOG_BOT_TOKEN.token, CONFIG.LOG_CHANNEL_ID, message),
+      )
 
-    while (!sent && attempts < maxAttempts) {
-      const bot = LOG_BOT_TOKENS[this.currentBotIndex]
-      const now = Date.now()
+      LOG_BOT_TOKEN.health = Math.min(100, LOG_BOT_TOKEN.health + 5) // Improve health on success
+      LOG_BOT_TOKEN.lastUsed = Date.now()
 
-      // Check if bot is in cooldown
-      const cooldownUntil = this.botCooldowns.get(bot.name) || 0
-      if (now < cooldownUntil) {
-        this.currentBotIndex = (this.currentBotIndex + 1) % LOG_BOT_TOKENS.length
-        attempts++
-        continue
+      console.log(`✅ Logs sent successfully using ${LOG_BOT_TOKEN.name} bot`)
+
+      // Remove sent logs from buffer
+      serverState.interactionBuffer.splice(0, CONFIG.MAX_INTERACTIONS_BUFFER)
+    } catch (error: any) {
+      LOG_BOT_TOKEN.health = Math.max(0, LOG_BOT_TOKEN.health - 10) // Decrease health on failure
+
+      if (error.message?.includes("Too Many Requests")) {
+        const retryAfter = error.parameters?.retry_after || 60
+        this.botCooldownUntil = Date.now() + retryAfter * 1000
+        console.warn(`⚠️ ${LOG_BOT_TOKEN.name} bot rate limited for ${retryAfter}s`)
+      } else {
+        console.error(`❌ Failed to send logs with ${LOG_BOT_TOKEN.name} bot:`, error.message)
       }
-
-      try {
-        await TelegramAPI.retryOperation(() => TelegramAPI.sendMessage(bot.token, CONFIG.LOG_CHANNEL_ID, message))
-
-        sent = true
-        bot.health = Math.min(100, bot.health + 5) // Improve health on success
-        bot.lastUsed = now
-
-        console.log(`✅ Logs sent successfully using ${bot.name} bot`)
-
-        // Remove sent logs from buffer
-        serverState.interactionBuffer.splice(0, CONFIG.MAX_INTERACTIONS_BUFFER)
-      } catch (error: any) {
-        bot.health = Math.max(0, bot.health - 10) // Decrease health on failure
-
-        if (error.message?.includes("Too Many Requests")) {
-          const retryAfter = error.parameters?.retry_after || 60
-          this.botCooldowns.set(bot.name, now + retryAfter * 1000)
-          console.warn(`⚠️ ${bot.name} bot rate limited for ${retryAfter}s`)
-        } else {
-          console.error(`❌ Failed to send logs with ${bot.name} bot:`, error.message)
-        }
-      }
-
-      this.currentBotIndex = (this.currentBotIndex + 1) % LOG_BOT_TOKENS.length
-      attempts++
-    }
-
-    if (!sent) {
-      // Set global cooldown if all bots failed
-      this.globalCooldownUntil = Date.now() + 30000 // 30 seconds
-      console.error("❌ All log bots failed. Setting global cooldown.")
     }
   }
 
   static getBotHealthStatus(): Array<{ name: string; health: number; lastUsed: number; inCooldown: boolean }> {
     const now = Date.now()
-    return LOG_BOT_TOKENS.map((bot) => ({
-      name: bot.name,
-      health: bot.health,
-      lastUsed: bot.lastUsed,
-      inCooldown: (this.botCooldowns.get(bot.name) || 0) > now,
-    }))
+    return [
+      {
+        name: LOG_BOT_TOKEN.name,
+        health: LOG_BOT_TOKEN.health,
+        lastUsed: LOG_BOT_TOKEN.lastUsed,
+        inCooldown: this.botCooldownUntil > now,
+      },
+    ]
   }
 }
 
