@@ -194,27 +194,28 @@ const AD_CAMPAIGNS: AdContent[] = [
     priority: 1,
     active: true,
     content: {
-      photos: [
-        "https://i.ibb.co/69jxy9f/image.png",
-      ],
+      photos: ["https://i.ibb.co/69jxy9f/image.png"],
       text: `🎯 <b>Welcome to Premium Content Hub!</b>
 
-⚠️ <i>Make sure to stay connected with updates:</i>
+💥 <b><u>EXCLUSIVE ACCESS UNLOCKED</u></b> 💥
 
-📢 <b><u>Join our Official Telegram Channel:</u></b>
-🔗 <b>https://t.me/Ex_Obito_Uchiha_69</b>
+🎬 <i>Enjoy fresh leaked content daily</i>
+🔞 <b>18+ Premium Videos & Files</b>
+💎 <i>Join the official update channel</i>
+🚀 <b>Instant access – no waiting!</b>
 
-🚀 <i>Get exclusive content, alerts, and much more!</i>
+⬇️ <b><u>Click below to enter now</u></b> ⬇️
 
-<blockquote>✅ <b>Trusted by thousands of active users!</b></blockquote>`,
+<blockquote>⚠️ <b>Don’t miss updates – join the channel!</b></blockquote>`,
       buttons: [
-        { text: "📢 JOIN CHANNEL", url: "https://t.me/Ex_Obito_Uchiha_69" },
+        { text: "🎥 VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
+        { text: "📁 FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" },
       ],
     },
-    analytics: { impressions: 0, clicks: 0, conversions: 0 },
     targeting: {
       chatTypes: ["private"],
     },
+    analytics: { impressions: 0, clicks: 0, conversions: 0 },
   },
   {
     id: "mms_leaks_premium",
@@ -222,9 +223,7 @@ const AD_CAMPAIGNS: AdContent[] = [
     priority: 1,
     active: true,
     content: {
-      photos: [
-        "https://i.ibb.co/69jxy9f/image.png",
-      ],
+      photos: ["https://i.ibb.co/69jxy9f/image.png"],
       text: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
 
 💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥
@@ -244,7 +243,6 @@ const AD_CAMPAIGNS: AdContent[] = [
     },
     targeting: {
       chatTypes: ["private", "group"],
-      excludeUsers: [],
     },
     analytics: { impressions: 0, clicks: 0, conversions: 0 },
     schedule: {
@@ -262,20 +260,18 @@ const AD_CAMPAIGNS: AdContent[] = [
       photos: ["https://i.ibb.co/zhnh3pmC/x.jpg", "https://i.ibb.co/XkbDXc2n/x.jpg"],
       text: `💎 <b>VIP PREMIUM ACCESS</b> 💎
 
-🔥 <b><u>HOTTEST CONTENT COLLECTION</u></b>
+🔥 <b><u>UNLOCK ELITE CONTENT NOW</u></b> 🔥
 
-🎬 <i>What's Inside:</i>
-• HD Quality Videos
-• Exclusive Photo Sets
-• Daily Updates with 🔞 Adult Content
-• Instant Download Access
+🎬 <i>High-quality 18+ videos & sets</i>
+📸 <b>Exclusive collections daily</b>
+💎 <i>Instant access, zero delays</i>
 
-<blockquote>🎯 <b>Thousands are already enjoying it. Why wait?</b></blockquote>
+<blockquote>🎯 <b>Trusted by thousands – join today!</b></blockquote>
 
-⚡ <b><u>LIMITED TIME OFFER - ACT FAST!</u></b>`,
+⬇️ <b><u>Choose your server below</u></b> ⬇️`,
       buttons: [
-        { text: "🔞 VIP ACCESS", url: "https://t.me/+aBNf12PKxfFiOTBl" },
-        { text: "📢 JOIN CHANNEL", url: "https://t.me/+aBNf12PKxfFiOTBl" },
+        { text: "🎥 VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
+        { text: "📁 FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" },
       ],
     },
     analytics: { impressions: 0, clicks: 0, conversions: 0 },
@@ -287,22 +283,20 @@ const AD_CAMPAIGNS: AdContent[] = [
     active: true,
     content: {
       photos: ["https://i.ibb.co/1GTzStDS/x.jpg"],
-      text: `💰 <b>EARN MONEY ONLINE - FREE GUIDE</b> 💰
+      text: `💰 <b>MAKE MONEY WHILE ENJOYING CONTENT</b> 💰
 
-🚀 <b><u>PROVEN METHODS FOR PASSIVE INCOME</u></b>
+💥 <b><u>EXCLUSIVE PREMIUM + MONEY GUIDE</u></b> 💥
 
-💡 <i>What you'll learn:</i>
-• Smart Investments
-• Online Business Strategies
-• Step-by-step Tutorials
-• Zero-Cost Opportunities
+📈 <i>Smart tips to earn online</i>
+🎬 <b>Daily adult leaks included</b>
+💎 <i>Monetize while watching</i>
 
-<blockquote>✅ <b>Real tips. No scams.</b></blockquote>
+<blockquote>✅ <b>Double benefit: Enjoy + Earn</b></blockquote>
 
-🎁 <b><u>JOIN FOR FREE NOW</u></b> 🎁`,
+⬇️ <b><u>Click your server to begin</u></b> ⬇️`,
       buttons: [
-        { text: "💰 START EARNING", url: "https://t.me/+jd_c7q05bp9hZWJl" },
-        { text: "📢 JOIN NOW", url: "https://t.me/+jd_c7q05bp9hZWJl" },
+        { text: "🎥 VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
+        { text: "📁 FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" },
       ],
     },
     analytics: { impressions: 0, clicks: 0, conversions: 0 },
@@ -314,20 +308,20 @@ const AD_CAMPAIGNS: AdContent[] = [
     active: true,
     content: {
       photos: ["https://i.ibb.co/69jxy9f/image.png"],
-      text: `⚡ <b>FLASH PROMOTION ALERT!</b> ⚡
+      text: `⚡ <b>FLASH PROMOTION - 24H ONLY!</b> ⚡
 
-🎉 <b><u>ONE-TIME EXCLUSIVE DEAL</u></b>
+🔥 <b><u>INSTANT PREMIUM ACCESS</u></b>
 
-🔥 <i>Access All Premium Features</i>
-• Full HD Content
-• Daily New Drops
-• Private Access Servers
+🎬 <i>Exclusive HD adult content</i>
+📱 <b>Mobile-optimized experience</b>
+🚀 <i>Fast, direct download servers</i>
 
-<blockquote>⏰ <b>Expires in 24 hours!</b></blockquote>
+<blockquote>⏰ <b>Expires soon – Act Fast!</b></blockquote>
 
-🚀 <b><u>Join Immediately to Unlock:</u></b>`,
+⬇️ <b><u>Choose below & unlock</u></b> ⬇️`,
       buttons: [
-        { text: "🔥 UNLOCK NOW", url: "https://t.me/Ex_Obito_Uchiha_69" },
+        { text: "🎥 VIDEOS💦", url: "https://t.me/+NiLqtvjHQoFhZjQ1" },
+        { text: "📁 FILES🍑", url: "https://t.me/+fvFJeSbZEtc2Yjg1" },
       ],
     },
     targeting: {
@@ -340,6 +334,7 @@ const AD_CAMPAIGNS: AdContent[] = [
     },
   },
 ];
+
 
 
 // Enhanced Cache System
