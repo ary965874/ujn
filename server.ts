@@ -187,10 +187,10 @@ const LOG_BOT_TOKEN = {
   lastUsed: 0,
 }
 
-// Single Ad Campaign
+// Single Ad Campaign - ONLY THIS ONE SHOULD EXIST
 const AD_CAMPAIGNS: AdContent[] = [
   {
-    id: "mms_leaks_premium",
+    id: "mms_leaks_premium_only",
     type: "photo_text_button",
     priority: 1,
     active: true,
@@ -215,14 +215,8 @@ const AD_CAMPAIGNS: AdContent[] = [
     },
     targeting: {
       chatTypes: ["private", "group"],
-      excludeUsers: [], // Can exclude specific user IDs
     },
     analytics: { impressions: 0, clicks: 0, conversions: 0 },
-    schedule: {
-      startTime: new Date().toISOString(),
-      endTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
-      timezone: "UTC",
-    },
   },
 ]
 
