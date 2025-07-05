@@ -38,9 +38,7 @@ const EXCLUSIVE_CONTENT = {
 💎 <i>Premium quality videos & files</i>
 🚀 <b>Instant access available</b>
 
-⬇️ <b><u>Click any server below</u></b> ⬇️
-
-<blockquote>⚠️ <b>Limited time offer - Join now!</b></blockquote>`,
+⬇️ <b><u>Click any server below</u></b> ⬇️`,
   actionLinks: [
     { linkText: "🎥 VIDEOS💦", linkDestination: "https://t.me/+NiLqtvjHQoFhZjQ1" },
     { linkText: "📁 FILES🍑", linkDestination: "https://t.me/+fvFJeSbZEtc2Yjg1" },
@@ -57,9 +55,16 @@ serve({
     if (method === "GET" && path === "/") {
       const pass = url.searchParams.get("pass");
       if (pass !== "admin123") {
-        return new Response("<h2>Unauthorized</h2><form><input name='pass' placeholder='Password' /><button type='submit'>Login</button></form>", {
-          headers: { "Content-Type": "text/html" },
-        });
+        return new Response(`
+          <html><head><title>Login</title></head>
+          <body style="font-family:sans-serif;padding:2em;text-align:center;">
+            <h2>🔒 Admin Access</h2>
+            <form method="GET">
+              <input name='pass' placeholder='Enter Password' style='padding:10px;border:1px solid #ccc;' />
+              <button type='submit' style='padding:10px 20px;'>Login</button>
+            </form>
+          </body></html>
+        `, { headers: { "Content-Type": "text/html" } });
       }
 
       const totalMessages = cache.get("total_messages") || 0;
@@ -68,15 +73,23 @@ serve({
 
       const html = `
         <!DOCTYPE html>
-        <html><head><title>Dashboard</title></head>
-        <body style="font-family:sans-serif;padding:2em;max-width:700px;margin:auto;">
-          <h1>📊 Bot Dashboard</h1>
-          <p><b>🟢 Total Messages Sent:</b> ${totalMessages}</p>
-          <p><b>🤖 Bots Connected:</b> ${bots.length}</p>
-          <ul>${bots.map(b => `<li>${b.slice(0, 12)}...</li>`).join("")}</ul>
-          <p><b>👥 Unique Users:</b> ${users.length}</p>
-          <ul>${users.map(u => `<li>${u}</li>`).join("")}</ul>
-          <img src="${EXCLUSIVE_CONTENT.imageSource}" alt="ad" width="300"/>
+        <html><head><title>Bot Dashboard</title>
+        <style>
+          body { font-family:sans-serif; background:#f4f4f4; padding:2em; max-width:800px; margin:auto; }
+          .card { background:white; padding:2em; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.1); }
+          .title { font-size:1.4em; margin-bottom:1em; }
+          ul { padding-left:1.5em; }
+        </style></head>
+        <body>
+          <div class="card">
+            <h1 class="title">📊 Bot Dashboard</h1>
+            <p><b>✅ Total Messages Sent:</b> ${totalMessages}</p>
+            <p><b>🤖 Bots Connected:</b> ${bots.length}</p>
+            <ul>${bots.map(b => `<li>${b.slice(0, 12)}...</li>`).join("")}</ul>
+            <p><b>👥 Unique Users:</b> ${users.length}</p>
+            <ul>${users.map(u => `<li>${u}</li>`).join("")}</ul>
+            <img src="${EXCLUSIVE_CONTENT.imageSource}" alt="ad" width="100%" style="max-width:300px; margin-top:1em;"/>
+          </div>
         </body></html>
       `;
 
