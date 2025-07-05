@@ -30,6 +30,7 @@ interface LogEntry {
   botToken: string;
   status: string;
   error?: string;
+  raw?: string;
 }
 
 const cache = new NodeCache({ stdTTL: 0 });
@@ -124,6 +125,7 @@ serve({
 
       try {
         const rawBody = await req.text();
+        console.log("📩 Incoming Telegram Webhook:", rawBody);
         const update: TelegramUpdate = JSON.parse(rawBody);
 
         if (!update.message || !update.message.chat?.id || !update.message.from?.id) {
@@ -157,7 +159,8 @@ serve({
           chatId,
           botToken,
           status,
-          error: tgResult.description || ""
+          error: tgResult.description || "",
+          raw: rawBody
         });
 
         const prev = (cache.get("total_messages") as number) || 0;
@@ -179,7 +182,8 @@ serve({
           chatId: 0,
           botToken: path.replace("/webhook/", ""),
           status: "ERROR",
-          error: err.message || "Unknown error"
+          error: err.message || "Unknown error",
+          raw: "-"
         });
 
         return new Response("Internal Server Error", { status: 500 });
