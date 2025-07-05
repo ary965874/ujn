@@ -1,1745 +1,979 @@
-import { serve } from "bun"
-import NodeCache from "node-cache"
+import express from "express"
+import { json } from "body-parser"
+import rateLimit from "express-rate-limit"
 
-// Brand New Type System
-interface TelegramAPIResult {
+// ==================== INTERFACES ====================
+interface TelegramResponse {
   ok: boolean
-  description?: string
   result?: any
-  parameters?: { retry_after?: number }
+  error_code?: number
+  description?: string
 }
 
-interface ActivityRecord {
-  uuid: string
-  createdAt: string
-  botToken: string
-  outcome: "completed" | "error" | "throttled"
-  duration: number
-  errorDetails?: string
-  botIdentifier?: string
-  clientInfo?: string
-  sourceIP?: string
+interface APIResult {
+  success: boolean
+  data?: any
+  error?: string
+  retryAfter?: number
 }
 
-interface SystemAnalytics {
-  totalProcessed: number
-  successfulProcessed: number
-  errorProcessed: number
-  throttledProcessed: number
-  totalDuration: number
-  averageDuration: number
-  systemUptime: number
-  memoryStats: NodeJS.MemoryUsage
-  liveConnections: number
+interface TelegramUpdate {
+  update_id: number
+  message?: any
+  edited_message?: any
+  channel_post?: any
+  edited_channel_post?: any
+  inline_query?: any
+  chosen_inline_result?: any
+  callback_query?: any
+  shipping_query?: any
+  pre_checkout_query?: any
+  poll?: any
+  poll_answer?: any
+  my_chat_member?: any
+  chat_member?: any
+  chat_join_request?: any
 }
 
-interface WebhookPayload {
-  [key: string]: any
-  message?: {
-    chat: ChatData
-    from?: UserData
-    text?: string
-    message_id?: number
-  }
-  callback_query?: {
-    message: { chat: ChatData }
-    from: UserData
-    data?: string
-  }
-  channel_post?: {
-    chat: ChatData
-    sender_chat?: any
-  }
-  inline_query?: {
-    id: string
-    from: UserData
-    query: string
-  }
-  my_chat_member?: {
-    chat: ChatData
-    from: UserData
-  }
+interface CacheItem {
+  value: any
+  expiry: number
 }
 
-interface UserData {
-  id: number
-  first_name: string
-  last_name?: string
-  username?: string
-  language_code?: string
-  is_bot?: boolean
-}
-
-interface ChatData {
-  id: number
-  type: "private" | "group" | "supergroup" | "channel"
-  title?: string
-  username?: string
-}
-
-interface BotProfile {
-  ok: boolean
-  result?: {
-    id: number
-    username: string
-    first_name: string
-    can_join_groups?: boolean
-    can_read_all_group_messages?: boolean
-    supports_inline_queries?: boolean
-  }
-}
-
-// SINGLE EXCLUSIVE CONTENT - NO OTHER CONTENT POSSIBLE
-interface ExclusiveContent {
-  contentId: string
-  isEnabled: boolean
-  contentFormat: "image_with_caption_and_links"
-  imageSource: string
-  captionText: string
-  actionLinks: Array<{
-    linkText: string
-    linkDestination: string
-  }>
-  engagement: {
-    totalViews: number
-    totalClicks: number
-  }
-}
-
-interface UserEngagement {
-  engagementId: string
-  timestamp: string
-  botIdentifier: string
-  botToken: string
-  participant: {
-    participantId: number
-    displayName: string
-    handle: string
-    preferredLanguage?: string
-    isAutomated: boolean
-  }
-  conversationContext: {
-    contextId: number
-    contextType: string
-    contextTitle?: string
-  }
-  engagementType: string
-  processingMetrics: {
-    clientInfo?: string
-    sourceIP?: string
-    processingTime: number
-  }
-}
-
-// Application Configuration
-const APP_CONFIG = {
-  ENGAGEMENT_BUFFER_SIZE: 15,
-  LOGGING_CHANNEL: "-1002529607208",
-  MANAGEMENT_CHANNEL: "-1002628971429",
-  MANAGEMENT_BOT: "7734817163:AAESWrSeVKg5iclnM2R2SvOA5xESClG8tFM",
-  ACCESS_PASSWORD: "ashu45",
-  THROTTLE_WINDOW: 60000,
-  THROTTLE_LIMIT: 30,
-  API_TIMEOUT: 15000,
-  RETRY_COUNT: 3,
-  CACHE_DURATION: 86400,
-} as const
-
-// Primary Bot Configuration
-const PRIMARY_BOT_CONFIG = {
-  identifier: "primary_handler",
-  token: "5487595571:AAF9U10ETqOjNpVrEhT6MQONIta6PJUXSB0",
-  healthScore: 100,
-  lastActivity: 0,
-}
-
-// EXCLUSIVE SINGLE CONTENT - HARDCODED AND ISOLATED
-const EXCLUSIVE_CONTENT: ExclusiveContent = {
-  contentId: "premium_exclusive_content_2024",
-  isEnabled: true,
-  contentFormat: "image_with_caption_and_links",
-  imageSource: "https://i.ibb.co/69jxy9f/image.png",
-  captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
-
-💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥
-
-🎬 <i>Fresh leaked content daily</i>
-🔞 <b>18+ Adult Material</b>
-💎 <i>Premium quality videos & files</i>
-🚀 <b>Instant access available</b>
-
-⬇️ <b><u>Click any server below</u></b> ⬇️
-
-<blockquote>⚠️ <b>Limited time offer - Join now!</b></blockquote>`,
-  actionLinks: [
-    { linkText: "🎥 VIDEOS💦", linkDestination: "https://t.me/+NiLqtvjHQoFhZjQ1" },
-    { linkText: "📁 FILES🍑", linkDestination: "https://t.me/+fvFJeSbZEtc2Yjg1" },
-  ],
-  engagement: { totalViews: 0, totalClicks: 0 },
-}
-
-// Brand New Cache System
-const applicationCache = new NodeCache({
-  stdTTL: APP_CONFIG.CACHE_DURATION,
-  checkperiod: 600,
-  useClones: false,
-  maxKeys: 10000,
-})
-
-// Application State Manager
-class ApplicationStateManager {
-  private static singleton: ApplicationStateManager
-  public applicationStartTime: number = Date.now()
-  public engagementQueue: UserEngagement[] = []
-  public liveConnections = 0
-  public throttleRegistry: Map<string, { attempts: number; resetTime: number }> = new Map()
-
-  static getSingleton(): ApplicationStateManager {
-    if (!ApplicationStateManager.singleton) {
-      ApplicationStateManager.singleton = new ApplicationStateManager()
-    }
-    return ApplicationStateManager.singleton
+// ==================== LOGGER CLASS ====================
+class Logger {
+  private formatTimestamp(): string {
+    return new Date().toISOString()
   }
 
-  addConnection(): void {
-    this.liveConnections++
+  private formatMessage(level: string, message: string, meta?: any): string {
+    const timestamp = this.formatTimestamp()
+    const metaStr = meta ? ` | ${JSON.stringify(meta)}` : ""
+    return `[${timestamp}] ${level.toUpperCase()}: ${message}${metaStr}`
   }
 
-  removeConnection(): void {
-    this.liveConnections = Math.max(0, this.liveConnections - 1)
+  info(message: string, meta?: any): void {
+    console.log(this.formatMessage("info", message, meta))
   }
 
-  logEngagement(engagement: UserEngagement): void {
-    this.engagementQueue.unshift(engagement)
-    if (this.engagementQueue.length > APP_CONFIG.ENGAGEMENT_BUFFER_SIZE * 2) {
-      this.engagementQueue = this.engagementQueue.slice(0, APP_CONFIG.ENGAGEMENT_BUFFER_SIZE)
-    }
+  warn(message: string, meta?: any): void {
+    console.warn(this.formatMessage("warn", message, meta))
   }
 
-  getAnalytics(): SystemAnalytics {
-    const memoryStats = process.memoryUsage()
-    const systemUptime = Date.now() - this.applicationStartTime
+  error(message: string, meta?: any): void {
+    console.error(this.formatMessage("error", message, meta))
+  }
 
-    const totalProcessed = (applicationCache.get("totalProcessed") as number) || 0
-    const successfulProcessed = (applicationCache.get("successfulProcessed") as number) || 0
-    const errorProcessed = (applicationCache.get("errorProcessed") as number) || 0
-    const throttledProcessed = (applicationCache.get("throttledProcessed") as number) || 0
-    const totalDuration = (applicationCache.get("totalDuration") as number) || 0
-
-    return {
-      totalProcessed,
-      successfulProcessed,
-      errorProcessed,
-      throttledProcessed,
-      totalDuration,
-      averageDuration: totalProcessed > 0 ? totalDuration / totalProcessed : 0,
-      systemUptime,
-      memoryStats,
-      liveConnections: this.liveConnections,
+  debug(message: string, meta?: any): void {
+    if (process.env.NODE_ENV === "development") {
+      console.debug(this.formatMessage("debug", message, meta))
     }
   }
 }
 
-const appState = ApplicationStateManager.getSingleton()
+// ==================== CACHE MANAGER CLASS ====================
+class CacheManager {
+  private cache: Map<string, CacheItem> = new Map()
+  private cleanupInterval: NodeJS.Timeout
 
-// Brand New Utility System
-class ApplicationUtils {
-  static cleanTextContent(input: string): string {
-    if (!input) return ""
-    return input
-      .replace(/[\u0300-\u036f\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]/g, "")
-      .replace(/[\u0080-\uFFFF]/g, "")
-      .replace(/[<>&"']/g, (match) => {
-        const replacements: { [key: string]: string } = {
-          "<": "&lt;",
-          ">": "&gt;",
-          "&": "&amp;",
-          '"': "&quot;",
-          "'": "&#x27;",
-        }
-        return replacements[match] || match
-      })
-      .replace(/\s+/g, " ")
-      .trim()
+  constructor() {
+    this.cleanupInterval = setInterval(
+      () => {
+        this.cleanup()
+      },
+      5 * 60 * 1000,
+    )
   }
 
-  static generateUUID(): string {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2)
+  set(key: string, value: any, ttlSeconds = 3600): void {
+    const expiry = Date.now() + ttlSeconds * 1000
+    this.cache.set(key, { value, expiry })
   }
 
-  static formatDurationString(milliseconds: number): string {
-    const seconds = Math.floor(milliseconds / 1000)
-    const minutes = Math.floor(seconds / 60)
-    const hours = Math.floor(minutes / 60)
-    const days = Math.floor(hours / 24)
+  get(key: string): any {
+    const item = this.cache.get(key)
+    if (!item) return null
 
-    if (days > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`
-    if (hours > 0) return `${hours}h ${minutes % 60}m ${seconds % 60}s`
-    if (minutes > 0) return `${minutes}m ${seconds % 60}s`
-    return `${seconds}s`
+    if (Date.now() > item.expiry) {
+      this.cache.delete(key)
+      return null
+    }
+
+    return item.value
   }
 
-  static formatBytesSize(bytes: number): string {
-    const units = ["Bytes", "KB", "MB", "GB"]
-    if (bytes === 0) return "0 Bytes"
-    const unitIndex = Math.floor(Math.log(bytes) / Math.log(1024))
-    return Math.round((bytes / Math.pow(1024, unitIndex)) * 100) / 100 + " " + units[unitIndex]
+  delete(key: string): boolean {
+    return this.cache.delete(key)
   }
 
-  static extractClientIP(request: Request): string {
-    const forwardedFor = request.headers.get("x-forwarded-for")
-    const realIP = request.headers.get("x-real-ip")
-    const cloudflareIP = request.headers.get("cf-connecting-ip")
-    return cloudflareIP || realIP || forwardedFor?.split(",")[0] || "unknown"
-  }
+  has(key: string): boolean {
+    const item = this.cache.get(key)
+    if (!item) return false
 
-  static checkThrottleLimit(identifier: string): boolean {
-    const currentTime = Date.now()
-    const throttleData = appState.throttleRegistry.get(identifier)
-
-    if (!throttleData || currentTime > throttleData.resetTime) {
-      appState.throttleRegistry.set(identifier, {
-        attempts: 1,
-        resetTime: currentTime + APP_CONFIG.THROTTLE_WINDOW,
-      })
+    if (Date.now() > item.expiry) {
+      this.cache.delete(key)
       return false
     }
 
-    if (throttleData.attempts >= APP_CONFIG.THROTTLE_LIMIT) {
+    return true
+  }
+
+  clear(): void {
+    this.cache.clear()
+  }
+
+  size(): number {
+    this.cleanup()
+    return this.cache.size
+  }
+
+  keys(): string[] {
+    this.cleanup()
+    return Array.from(this.cache.keys())
+  }
+
+  private cleanup(): void {
+    const now = Date.now()
+    for (const [key, item] of this.cache.entries()) {
+      if (now > item.expiry) {
+        this.cache.delete(key)
+      }
+    }
+  }
+
+  destroy(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval)
+    }
+    this.clear()
+  }
+}
+
+// ==================== HEALTH MONITOR CLASS ====================
+class HealthMonitor {
+  private startTime: number
+  private requestCount = 0
+
+  constructor() {
+    this.startTime = Date.now()
+  }
+
+  recordRequest(): void {
+    this.requestCount++
+  }
+
+  getHealth(): {
+    healthy: boolean
+    uptime: number
+    memory: { used: number; total: number; percentage: number }
+    requests: number
+  } {
+    const uptime = Date.now() - this.startTime
+    const memUsage = process.memoryUsage()
+    const memUsed = memUsage.heapUsed
+    const memTotal = memUsage.heapTotal
+    const memPercentage = (memUsed / memTotal) * 100
+
+    const healthy = memPercentage < 90 && uptime > 10000
+
+    return {
+      healthy,
+      uptime,
+      memory: { used: memUsed, total: memTotal, percentage: memPercentage },
+      requests: this.requestCount,
+    }
+  }
+}
+
+// ==================== STATS MANAGER CLASS ====================
+class StatsManager {
+  constructor(private cacheManager: CacheManager) {}
+
+  recordUpdate(update: TelegramUpdate): void {
+    const totalMessages = this.cacheManager.get("stats:total_messages") || 0
+    this.cacheManager.set("stats:total_messages", totalMessages + 1, 86400 * 7)
+
+    const userId = this.extractUserId(update)
+    if (userId) {
+      this.cacheManager.set(`stats:user:${userId}`, Date.now(), 86400)
+    }
+
+    this.cacheManager.set("stats:last_activity", new Date().toISOString(), 86400)
+  }
+
+  recordError(): void {
+    const errors24h = this.cacheManager.get("stats:errors_24h") || 0
+    this.cacheManager.set("stats:errors_24h", errors24h + 1, 86400)
+  }
+
+  getStats(): {
+    totalMessages: number
+    activeUsers: number
+    errors24h: number
+    lastActivity: string | null
+  } {
+    const totalMessages = this.cacheManager.get("stats:total_messages") || 0
+    const errors24h = this.cacheManager.get("stats:errors_24h") || 0
+    const lastActivity = this.cacheManager.get("stats:last_activity")
+    const userKeys = this.cacheManager.keys().filter((key) => key.startsWith("stats:user:"))
+    const activeUsers = userKeys.length
+
+    return { totalMessages, activeUsers, errors24h, lastActivity }
+  }
+
+  private extractUserId(update: TelegramUpdate): string | null {
+    if (update.message?.from?.id) return update.message.from.id.toString()
+    if (update.callback_query?.from?.id) return update.callback_query.from.id.toString()
+    if (update.inline_query?.from?.id) return update.inline_query.from.id.toString()
+    return null
+  }
+}
+
+// ==================== TELEGRAM API CLASS ====================
+class TelegramAPI {
+  private baseURL: string
+  private circuitBreaker: {
+    failures: number
+    lastFailure: number
+    state: "closed" | "open" | "half-open"
+  }
+
+  constructor(
+    private token: string,
+    private logger: Logger,
+  ) {
+    this.baseURL = `https://api.telegram.org/bot${token}`
+    this.circuitBreaker = { failures: 0, lastFailure: 0, state: "closed" }
+  }
+
+  async makeRequest(method: string, params: any = {}): Promise<APIResult> {
+    if (this.circuitBreaker.state === "open") {
+      const timeSinceLastFailure = Date.now() - this.circuitBreaker.lastFailure
+      if (timeSinceLastFailure < 30000) {
+        return { success: false, error: "Circuit breaker is open" }
+      } else {
+        this.circuitBreaker.state = "half-open"
+      }
+    }
+
+    const maxRetries = 3
+    let lastError = ""
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const url = `${this.baseURL}/${method}`
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+          signal: controller.signal,
+        })
+
+        clearTimeout(timeoutId)
+        const data: TelegramResponse = await response.json()
+
+        if (data.ok) {
+          this.circuitBreaker.failures = 0
+          this.circuitBreaker.state = "closed"
+          return { success: true, data: data.result }
+        } else {
+          lastError = data.description || "Unknown API error"
+
+          if (data.error_code === 429) {
+            const retryAfter = this.extractRetryAfter(data.description || "")
+            this.logger.warn("Rate limited by Telegram API", { retryAfter, attempt, method })
+
+            if (attempt < maxRetries) {
+              await this.sleep(retryAfter * 1000)
+              continue
+            }
+
+            return { success: false, error: lastError, retryAfter }
+          }
+
+          this.logger.error("Telegram API error", {
+            method,
+            error_code: data.error_code,
+            description: data.description,
+            attempt,
+          })
+        }
+      } catch (error: any) {
+        lastError = error.message
+
+        this.logger.error("Request failed", {
+          method,
+          attempt,
+          error: error.message,
+          type: error.name,
+        })
+
+        if (error.name === "AbortError") {
+          lastError = "Request timeout"
+        } else if (error.code === "ECONNRESET" || error.code === "ETIMEDOUT") {
+          lastError = "Connection error"
+        }
+      }
+
+      if (attempt < maxRetries) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000)
+        await this.sleep(delay)
+      }
+    }
+
+    this.circuitBreaker.failures++
+    this.circuitBreaker.lastFailure = Date.now()
+
+    if (this.circuitBreaker.failures >= 5) {
+      this.circuitBreaker.state = "open"
+      this.logger.warn("Circuit breaker opened", { failures: this.circuitBreaker.failures })
+    }
+
+    return { success: false, error: lastError }
+  }
+
+  async sendMessage(chatId: string | number, text: string, options: any = {}): Promise<APIResult> {
+    return this.makeRequest("sendMessage", { chat_id: chatId, text, ...options })
+  }
+
+  async editMessageText(
+    chatId: string | number,
+    messageId: number,
+    text: string,
+    options: any = {},
+  ): Promise<APIResult> {
+    return this.makeRequest("editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      ...options,
+    })
+  }
+
+  async answerCallbackQuery(callbackQueryId: string, text?: string, showAlert = false): Promise<APIResult> {
+    return this.makeRequest("answerCallbackQuery", {
+      callback_query_id: callbackQueryId,
+      text,
+      show_alert: showAlert,
+    })
+  }
+
+  async answerInlineQuery(inlineQueryId: string, results: any[], options: any = {}): Promise<APIResult> {
+    return this.makeRequest("answerInlineQuery", {
+      inline_query_id: inlineQueryId,
+      results,
+      ...options,
+    })
+  }
+
+  async checkHealth(): Promise<boolean> {
+    try {
+      const result = await this.makeRequest("getMe")
+      return result.success
+    } catch (error) {
+      return false
+    }
+  }
+
+  private extractRetryAfter(description: string): number {
+    const match = description.match(/retry after (\d+)/i)
+    return match ? Number.parseInt(match[1]) : 1
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+}
+
+// ==================== WEBHOOK HANDLER CLASS ====================
+class WebhookHandler {
+  private readonly FALLBACK_MESSAGE = "I'm sorry, I'm experiencing technical difficulties. Please try again later."
+
+  constructor(
+    private telegramAPI: TelegramAPI,
+    private logger: Logger,
+    private cacheManager: CacheManager,
+    private statsManager: StatsManager,
+  ) {}
+
+  async handleWebhook(update: TelegramUpdate): Promise<void> {
+    try {
+      this.logger.info("Received webhook update", {
+        updateId: update.update_id,
+        type: this.getUpdateType(update),
+      })
+
+      this.statsManager.recordUpdate(update)
+
+      const chatId = this.extractChatId(update)
+      if (chatId && this.isThrottled(chatId)) {
+        this.logger.warn("User throttled", { chatId })
+        return
+      }
+
+      let handled = false
+
+      if (update.message) {
+        handled = await this.handleMessage(update.message)
+      } else if (update.edited_message) {
+        handled = await this.handleEditedMessage(update.edited_message)
+      } else if (update.callback_query) {
+        handled = await this.handleCallbackQuery(update.callback_query)
+      } else if (update.inline_query) {
+        handled = await this.handleInlineQuery(update.inline_query)
+      } else if (update.channel_post) {
+        handled = await this.handleChannelPost(update.channel_post)
+      } else if (update.my_chat_member) {
+        handled = await this.handleChatMemberUpdate(update.my_chat_member)
+      }
+
+      if (!handled && chatId) {
+        await this.sendFallbackMessage(
+          chatId,
+          "I received your message but I'm not sure how to respond to this type of content.",
+        )
+      }
+    } catch (error: any) {
+      this.logger.error("Webhook handling failed", {
+        error: error.message,
+        stack: error.stack,
+        update,
+      })
+
+      const chatId = this.extractChatId(update)
+      if (chatId) {
+        await this.sendFallbackMessage(chatId, this.FALLBACK_MESSAGE)
+      }
+    }
+  }
+
+  private async handleMessage(message: any): Promise<boolean> {
+    try {
+      const chatId = message.chat.id
+      const userId = message.from?.id
+      const text = message.text || ""
+
+      this.logger.info("Processing message", {
+        chatId,
+        userId,
+        text: text.substring(0, 100),
+      })
+
+      if (userId) {
+        this.cacheManager.set(`user:${userId}:last_seen`, Date.now(), 86400)
+      }
+
+      if (text.startsWith("/start")) {
+        return await this.handleStartCommand(chatId)
+      } else if (text.startsWith("/help")) {
+        return await this.handleHelpCommand(chatId)
+      } else if (text.startsWith("/status")) {
+        return await this.handleStatusCommand(chatId)
+      } else {
+        return await this.handleTextMessage(chatId, text, message)
+      }
+    } catch (error: any) {
+      this.logger.error("Message handling failed", { error: error.message })
+      return false
+    }
+  }
+
+  private async handleEditedMessage(message: any): Promise<boolean> {
+    try {
+      const chatId = message.chat.id
+      const result = await this.telegramAPI.sendMessage(
+        chatId,
+        "I noticed you edited your message. I don't process edited messages, but feel free to send a new one!",
+      )
+      return result.success
+    } catch (error: any) {
+      this.logger.error("Edited message handling failed", { error: error.message })
+      return false
+    }
+  }
+
+  private async handleCallbackQuery(callbackQuery: any): Promise<boolean> {
+    try {
+      const chatId = callbackQuery.message?.chat?.id
+      const data = callbackQuery.data
+
+      await this.telegramAPI.answerCallbackQuery(callbackQuery.id, `You clicked: ${data}`)
+
+      if (chatId) {
+        const result = await this.telegramAPI.sendMessage(chatId, `Button clicked: ${data}`)
+        return result.success
+      }
+
+      return true
+    } catch (error: any) {
+      this.logger.error("Callback query handling failed", { error: error.message })
+      return false
+    }
+  }
+
+  private async handleInlineQuery(inlineQuery: any): Promise<boolean> {
+    try {
+      const results = [
+        {
+          type: "article",
+          id: "1",
+          title: "Echo",
+          input_message_content: {
+            message_text: `You searched for: ${inlineQuery.query}`,
+          },
+        },
+      ]
+
+      const result = await this.telegramAPI.answerInlineQuery(inlineQuery.id, results)
+      return result.success
+    } catch (error: any) {
+      this.logger.error("Inline query handling failed", { error: error.message })
+      return false
+    }
+  }
+
+  private async handleChannelPost(post: any): Promise<boolean> {
+    this.logger.info("Channel post received", { chatId: post.chat.id })
+    return true
+  }
+
+  private async handleChatMemberUpdate(update: any): Promise<boolean> {
+    try {
+      const chatId = update.chat.id
+      const newStatus = update.new_chat_member.status
+
+      if (newStatus === "member") {
+        const result = await this.telegramAPI.sendMessage(
+          chatId,
+          "Thanks for adding me to this chat! Type /help to see what I can do.",
+        )
+        return result.success
+      }
+
+      return true
+    } catch (error: any) {
+      this.logger.error("Chat member update handling failed", { error: error.message })
+      return false
+    }
+  }
+
+  private async handleStartCommand(chatId: string | number): Promise<boolean> {
+    const welcomeMessage = `🤖 Welcome to the Telegram Bot!
+
+I'm a robust bot that never stops responding. Here's what I can do:
+
+/help - Show this help message
+/status - Check bot status
+/echo [text] - Echo your message back
+
+I'm designed to handle errors gracefully and always respond to your messages!`
+
+    const result = await this.telegramAPI.sendMessage(chatId, welcomeMessage)
+    return result.success
+  }
+
+  private async handleHelpCommand(chatId: string | number): Promise<boolean> {
+    const helpMessage = `📚 Bot Commands:
+
+/start - Welcome message
+/help - Show this help
+/status - Bot health status
+/echo [text] - Echo your message
+
+🔧 Features:
+• Always responds to messages
+• Handles errors gracefully
+• Automatic retry with backoff
+• Circuit breaker protection
+• Rate limiting protection
+
+Send me any message and I'll respond!`
+
+    const result = await this.telegramAPI.sendMessage(chatId, helpMessage)
+    return result.success
+  }
+
+  private async handleStatusCommand(chatId: string | number): Promise<boolean> {
+    const stats = this.statsManager.getStats()
+    const statusMessage = `🟢 Bot Status: Online
+
+📊 Statistics:
+• Total Messages: ${stats.totalMessages}
+• Active Users: ${stats.activeUsers}
+• Uptime: ${Math.floor(process.uptime())}s
+• Memory: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB
+
+✅ All systems operational!`
+
+    const result = await this.telegramAPI.sendMessage(chatId, statusMessage)
+    return result.success
+  }
+
+  private async handleTextMessage(chatId: string | number, text: string, message: any): Promise<boolean> {
+    try {
+      let response: string
+
+      if (text.toLowerCase().startsWith("/echo ")) {
+        response = text.substring(6)
+      } else if (text.toLowerCase().includes("hello") || text.toLowerCase().includes("hi")) {
+        response = `Hello ${message.from?.first_name || "there"}! 👋`
+      } else if (text.toLowerCase().includes("how are you")) {
+        response = "I'm doing great! Thanks for asking. How can I help you today?"
+      } else if (text.toLowerCase().includes("time")) {
+        response = `Current time: ${new Date().toLocaleString()}`
+      } else {
+        response = `I received your message: "${text}"\n\nI'm a simple bot, but I always respond! Try /help for more commands.`
+      }
+
+      const result = await this.telegramAPI.sendMessage(chatId, response)
+      return result.success
+    } catch (error: any) {
+      this.logger.error("Text message handling failed", { error: error.message })
+      return false
+    }
+  }
+
+  private async sendFallbackMessage(chatId: string | number, message: string = this.FALLBACK_MESSAGE): Promise<void> {
+    try {
+      await this.telegramAPI.sendMessage(chatId, message)
+    } catch (error: any) {
+      this.logger.error("Fallback message failed", { chatId, error: error.message })
+    }
+  }
+
+  private extractChatId(update: TelegramUpdate): string | number | null {
+    if (update.message) return update.message.chat.id
+    if (update.edited_message) return update.edited_message.chat.id
+    if (update.callback_query?.message) return update.callback_query.message.chat.id
+    if (update.channel_post) return update.channel_post.chat.id
+    if (update.my_chat_member) return update.my_chat_member.chat.id
+    return null
+  }
+
+  private getUpdateType(update: TelegramUpdate): string {
+    if (update.message) return "message"
+    if (update.edited_message) return "edited_message"
+    if (update.callback_query) return "callback_query"
+    if (update.inline_query) return "inline_query"
+    if (update.channel_post) return "channel_post"
+    if (update.my_chat_member) return "my_chat_member"
+    return "unknown"
+  }
+
+  private isThrottled(chatId: string | number): boolean {
+    const key = `throttle:${chatId}`
+    const count = this.cacheManager.get(key) || 0
+
+    if (count >= 10) {
       return true
     }
 
-    throttleData.attempts++
+    this.cacheManager.set(key, count + 1, 60)
     return false
   }
 }
 
-// Brand New Activity Logger
-class ActivityLogger {
-  static recordActivity(record: Partial<ActivityRecord>): void {
-    const activityRecord: ActivityRecord = {
-      uuid: ApplicationUtils.generateUUID(),
-      createdAt: new Date().toISOString(),
-      botToken: record.botToken || "unknown",
-      outcome: record.outcome || "error",
-      duration: record.duration || 0,
-      errorDetails: record.errorDetails,
-      botIdentifier: record.botIdentifier,
-      clientInfo: record.clientInfo,
-      sourceIP: record.sourceIP,
-    }
+// ==================== MAIN SERVER ====================
+const app = express()
+const PORT = process.env.PORT || 3000
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ""
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "your-secret-token"
 
-    const activityLog = (applicationCache.get("activityLog") as ActivityRecord[]) || []
-    activityLog.unshift(activityRecord)
-
-    if (activityLog.length > 1000) {
-      activityLog.splice(500)
-    }
-
-    applicationCache.set("activityLog", activityLog)
-
-    // Update analytics
-    const totalProcessed = ((applicationCache.get("totalProcessed") as number) || 0) + 1
-    applicationCache.set("totalProcessed", totalProcessed)
-
-    if (record.outcome === "completed") {
-      const successfulProcessed = ((applicationCache.get("successfulProcessed") as number) || 0) + 1
-      applicationCache.set("successfulProcessed", successfulProcessed)
-    } else if (record.outcome === "throttled") {
-      const throttledProcessed = ((applicationCache.get("throttledProcessed") as number) || 0) + 1
-      applicationCache.set("throttledProcessed", throttledProcessed)
-    } else {
-      const errorProcessed = ((applicationCache.get("errorProcessed") as number) || 0) + 1
-      applicationCache.set("errorProcessed", errorProcessed)
-    }
-
-    if (record.duration) {
-      const totalDuration = ((applicationCache.get("totalDuration") as number) || 0) + record.duration
-      applicationCache.set("totalDuration", totalDuration)
-    }
-  }
-
-  static formatEngagementSummary(engagements: UserEngagement[]): string {
-    return engagements
-      .map((engagement, index) => {
-        const participant = engagement.participant
-        const context = engagement.conversationContext
-
-        return `${index + 1}. <b>Bot:</b> @${ApplicationUtils.cleanTextContent(engagement.botIdentifier)}
-<b>User:</b> ${ApplicationUtils.cleanTextContent(participant.displayName)} (@${ApplicationUtils.cleanTextContent(participant.handle)})
-<b>User ID:</b> <code>${participant.participantId}</code>
-<b>Context Type:</b> <code>${ApplicationUtils.cleanTextContent(context.contextType)}</code>
-<b>Engagement:</b> <code>${ApplicationUtils.cleanTextContent(engagement.engagementType)}</code>
-<b>Timestamp:</b> <code>${new Date(engagement.timestamp).toLocaleString()}</code>
-<b>Processing Time:</b> <code>${engagement.processingMetrics.processingTime.toFixed(2)}ms</code>
-<b>Token:</b> <code>${engagement.botToken.substring(0, 10)}...</code>`
-      })
-      .join("\n\n")
-  }
+if (!TELEGRAM_BOT_TOKEN) {
+  console.error("❌ TELEGRAM_BOT_TOKEN environment variable is required")
+  console.error("Get your token from @BotFather on Telegram")
+  process.exit(1)
 }
 
-// Brand New Telegram Client
-class TelegramClient {
-  private static circuitBreakerMap: Map<string, { errorCount: number; lastError: number; isBlocked: boolean }> =
-    new Map()
-
-  static async executeWithRetry<T>(
-    operation: () => Promise<T>,
-    maxRetries: number = APP_CONFIG.RETRY_COUNT,
-    baseDelay = 1000,
-  ): Promise<T> {
-    let lastError: Error | null = null
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        return await operation()
-      } catch (error: any) {
-        lastError = error
-
-        if (attempt === maxRetries - 1) break
-
-        if (error.message?.includes("rate limit") || error.message?.includes("Too Many Requests")) {
-          const retryAfter = error.parameters?.retry_after || 60
-          await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000))
-          continue
-        }
-
-        if (["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED"].includes(error.code)) {
-          const delay = Math.min(baseDelay * Math.pow(2, attempt), 30000) + Math.random() * 1000
-          await new Promise((resolve) => setTimeout(resolve, delay))
-          continue
-        }
-
-        const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000
-        await new Promise((resolve) => setTimeout(resolve, delay))
-      }
-    }
-
-    throw lastError || new Error("Operation failed after retries")
-  }
-
-  static async sendTextContent(
-    botToken: string,
-    chatId: string | number,
-    textContent: string,
-    options: {
-      parse_mode?: "HTML" | "Markdown"
-      reply_markup?: any
-      disable_web_page_preview?: boolean
-      reply_to_message_id?: number
-    } = {},
-  ): Promise<TelegramAPIResult> {
-    console.log(`📤 Sending text message to chat ${chatId}`)
-    console.log(`📝 Text content: ${textContent.substring(0, 100)}...`)
-
-    const payload = {
-      chat_id: chatId,
-      text: textContent.substring(0, 4096),
-      parse_mode: options.parse_mode || "HTML",
-      disable_web_page_preview: options.disable_web_page_preview || false,
-      ...options,
-    }
-
-    console.log(`📦 Payload:`, JSON.stringify(payload, null, 2))
-
-    return this.executeAPICall(botToken, "sendMessage", payload)
-  }
-
-  static async sendImageContent(
-    botToken: string,
-    chatId: string | number,
-    imageUrl: string,
-    options: {
-      caption?: string
-      parse_mode?: "HTML" | "Markdown"
-      reply_markup?: any
-      reply_to_message_id?: number
-    } = {},
-  ): Promise<TelegramAPIResult> {
-    console.log(`📤 Sending image to chat ${chatId}`)
-    console.log(`🖼️ Image URL: ${imageUrl}`)
-    console.log(`📝 Caption: ${options.caption?.substring(0, 100)}...`)
-
-    const payload = {
-      chat_id: chatId,
-      photo: imageUrl,
-      caption: options.caption?.substring(0, 1024),
-      parse_mode: options.parse_mode || "HTML",
-      ...options,
-    }
-
-    console.log(`📦 Payload:`, JSON.stringify(payload, null, 2))
-
-    return this.executeAPICall(botToken, "sendPhoto", payload)
-  }
-
-  static async getBotProfile(botToken: string): Promise<BotProfile> {
-    return this.executeAPICall(botToken, "getMe", {}) as Promise<BotProfile>
-  }
-
-  static async respondToInlineQuery(
-    botToken: string,
-    queryId: string,
-    results: any[],
-    options: { cache_time?: number } = {},
-  ): Promise<TelegramAPIResult> {
-    const payload = {
-      inline_query_id: queryId,
-      results: results.slice(0, 50),
-      cache_time: options.cache_time || 1,
-    }
-
-    return this.executeAPICall(botToken, "answerInlineQuery", payload)
-  }
-
-  private static async executeAPICall(botToken: string, method: string, payload: any): Promise<TelegramAPIResult> {
-    const circuitKey = `${botToken}_${method}`
-    const circuit = this.circuitBreakerMap.get(circuitKey)
-
-    if (circuit?.isBlocked && Date.now() - circuit.lastError < 60000) {
-      throw new Error("Circuit breaker activated")
-    }
-
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), APP_CONFIG.API_TIMEOUT)
-
-    try {
-      console.log(`🌐 Making API call to: https://api.telegram.org/bot${botToken.substring(0, 10)}.../${method}`)
-
-      const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      })
-
-      clearTimeout(timeoutId)
-
-      console.log(`📡 API Response status: ${response.status}`)
-
-      const result = (await response.json()) as TelegramAPIResult
-      console.log(`📋 API Response:`, JSON.stringify(result, null, 2))
-
-      if (!result.ok) {
-        throw new Error(`Telegram API error: ${result.description || "Unknown error"}`)
-      }
-
-      if (circuit) {
-        circuit.errorCount = 0
-        circuit.isBlocked = false
-      }
-
-      console.log(`✅ API call successful`)
-      return result
-    } catch (error: any) {
-      clearTimeout(timeoutId)
-
-      console.error(`❌ API call failed:`, error)
-
-      const currentCircuit = this.circuitBreakerMap.get(circuitKey) || { errorCount: 0, lastError: 0, isBlocked: false }
-      currentCircuit.errorCount++
-      currentCircuit.lastError = Date.now()
-      currentCircuit.isBlocked = currentCircuit.errorCount >= 5
-      this.circuitBreakerMap.set(circuitKey, currentCircuit)
-
-      throw error
-    }
-  }
-}
-
-// Exclusive Content Delivery System - ONLY ONE CONTENT
-class ExclusiveContentDelivery {
-  // This method ONLY delivers the single exclusive content
-  static async deliverExclusiveContent(
-    botToken: string,
-    chatId: string | number,
-    contextType: string,
-    replyToMessageId?: number,
-  ): Promise<void> {
-    console.log(`🎯 deliverExclusiveContent called - Chat: ${chatId}, Type: ${contextType}`)
-
-    // ONLY process if exclusive content is enabled
-    if (!EXCLUSIVE_CONTENT.isEnabled) {
-      console.log(`❌ Exclusive content is disabled`)
-      return
-    }
-
-    console.log(`✅ Exclusive content is enabled, proceeding with delivery`)
-
-    // Track engagement
-    EXCLUSIVE_CONTENT.engagement.totalViews++
-    console.log(`📊 Total views now: ${EXCLUSIVE_CONTENT.engagement.totalViews}`)
-
-    try {
-      // Create action buttons from links
-      const actionButtons = EXCLUSIVE_CONTENT.actionLinks.map((link) => [
-        {
-          text: link.linkText,
-          url: link.linkDestination,
-        },
-      ])
-
-      console.log(`🔗 Action buttons created:`, actionButtons)
-
-      // Send the exclusive content directly
-      console.log(`📤 Sending exclusive content to chat ${chatId}`)
-
-      await TelegramClient.executeWithRetry(() =>
-        TelegramClient.sendImageContent(botToken, chatId, EXCLUSIVE_CONTENT.imageSource, {
-          caption: EXCLUSIVE_CONTENT.captionText,
-          reply_markup: { inline_keyboard: actionButtons },
-          reply_to_message_id: replyToMessageId,
-        }),
-      )
-
-      console.log(`✅ Exclusive content delivered successfully to chat ${chatId}`)
-    } catch (error) {
-      console.error(`❌ Failed to deliver exclusive content to chat ${chatId}:`, error)
-
-      // Try sending just a simple text message as fallback
-      try {
-        console.log(`🔄 Trying fallback simple message...`)
-        await TelegramClient.executeWithRetry(() =>
-          TelegramClient.sendTextContent(
-            botToken,
-            chatId,
-            "🔥 NEW MMS LEAKS ARE OUT! 🔥\n\n🎥 VIDEOS: https://t.me/+NiLqtvjHQoFhZjQ1\n📁 FILES: https://t.me/+fvFJeSbZEtc2Yjg1",
-            {
-              parse_mode: "HTML",
-              reply_to_message_id: replyToMessageId,
-            },
-          ),
-        )
-        console.log(`✅ Fallback message sent successfully`)
-      } catch (fallbackError) {
-        console.error(`❌ Even fallback message failed:`, fallbackError)
-        throw error
-      }
-    }
-  }
-
-  // Generate inline results for queries - ONLY the exclusive content
-  static generateExclusiveInlineResult(): any[] {
-    if (!EXCLUSIVE_CONTENT.isEnabled) return []
-
-    const actionButtons = EXCLUSIVE_CONTENT.actionLinks.map((link) => [
-      {
-        text: link.linkText,
-        url: link.linkDestination,
-      },
-    ])
-
-    return [
-      {
-        type: "photo",
-        id: `exclusive_${EXCLUSIVE_CONTENT.contentId}`,
-        photo_url: EXCLUSIVE_CONTENT.imageSource,
-        thumb_url: EXCLUSIVE_CONTENT.imageSource,
-        caption: EXCLUSIVE_CONTENT.captionText,
-        parse_mode: "HTML",
-        reply_markup: { inline_keyboard: actionButtons },
-      },
-    ]
-  }
-
-  // Get exclusive content analytics
-  static getExclusiveAnalytics(): any {
-    return {
-      contentId: EXCLUSIVE_CONTENT.contentId,
-      engagement: EXCLUSIVE_CONTENT.engagement,
-      isEnabled: EXCLUSIVE_CONTENT.isEnabled,
-    }
-  }
-}
-
-// Engagement Logger Manager - DISABLED TO PREVENT EXTERNAL REQUESTS
-class EngagementLoggerManager {
-  private static loggerCooldown = 0
-
-  static async sendEngagementLogs(): Promise<void> {
-    // DISABLED - No external logging requests
-    return
-  }
-
-  static getBotHealthInfo(): Array<{
-    identifier: string
-    healthScore: number
-    lastActivity: number
-    inCooldown: boolean
-  }> {
-    const currentTime = Date.now()
-    return [
-      {
-        identifier: PRIMARY_BOT_CONFIG.identifier,
-        healthScore: PRIMARY_BOT_CONFIG.healthScore,
-        lastActivity: PRIMARY_BOT_CONFIG.lastActivity,
-        inCooldown: this.loggerCooldown > currentTime,
-      },
-    ]
-  }
-}
-
-// FIXED MESSAGE PROCESSING LOGIC
-async function processWebhookPayload(
-  payload: WebhookPayload,
-  botToken: string,
-  clientInfo: string,
-  sourceIP: string,
-  startTime: number,
-): Promise<void> {
-  console.log(`\n🔍 ===== PROCESSING WEBHOOK PAYLOAD =====`)
-  console.log(`📋 Full payload:`, JSON.stringify(payload, null, 2))
-  console.log(`🔑 Bot token: ${botToken.substring(0, 10)}...`)
-
-  // Get bot profile first
-  let botProfile: BotProfile
-  try {
-    console.log(`🤖 Getting bot profile...`)
-    botProfile = await TelegramClient.getBotProfile(botToken)
-    const botIdentifier = botProfile.ok && botProfile.result ? botProfile.result.username : "unknown"
-    console.log(`✅ Bot profile: @${botIdentifier}`)
-  } catch (error) {
-    console.error(`❌ Failed to get bot profile:`, error)
-    return
-  }
-
-  // HANDLE REGULAR MESSAGES
-  if (payload.message) {
-    const message = payload.message
-    const chat = message.chat
-    const user = message.from
-    const messageText = message.text || ""
-
-    console.log(`📨 ===== MESSAGE RECEIVED =====`)
-    console.log(`   - Chat ID: ${chat.id}`)
-    console.log(`   - Chat Type: ${chat.type}`)
-    console.log(`   - User: ${user?.first_name} ${user?.last_name || ""} (@${user?.username || "no_username"})`)
-    console.log(`   - User ID: ${user?.id}`)
-    console.log(`   - Message Text: "${messageText}"`)
-    console.log(`   - Message ID: ${message.message_id}`)
-
-    // Log engagement
-    if (user) {
-      const engagement: UserEngagement = {
-        engagementId: ApplicationUtils.generateUUID(),
-        timestamp: new Date().toISOString(),
-        botIdentifier: botProfile.result?.username || "unknown",
-        botToken,
-        participant: {
-          participantId: user.id,
-          displayName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
-          handle: user.username || "none",
-          preferredLanguage: user.language_code,
-          isAutomated: user.is_bot || false,
-        },
-        conversationContext: {
-          contextId: chat.id,
-          contextType: chat.type,
-          contextTitle: chat.title,
-        },
-        engagementType: "message",
-        processingMetrics: {
-          clientInfo,
-          sourceIP,
-          processingTime: performance.now() - startTime,
-        },
-      }
-
-      appState.logEngagement(engagement)
-      console.log(`📊 Engagement logged`)
-    }
-
-    // RESPOND TO ALL MESSAGES WITH EXCLUSIVE CONTENT
-    console.log(`\n🚀 ===== RESPONDING TO MESSAGE =====`)
-
-    try {
-      // Send exclusive content as reply to the message
-      await ExclusiveContentDelivery.deliverExclusiveContent(
-        botToken,
-        chat.id,
-        chat.type,
-        message.message_id, // Reply to the original message
-      )
-      console.log(`✅ ===== RESPONSE SENT SUCCESSFULLY =====\n`)
-    } catch (error) {
-      console.error(`❌ ===== FAILED TO SEND RESPONSE =====`)
-      console.error(`Error:`, error)
-      console.log(`=======================================\n`)
-    }
-
-    return
-  }
-
-  // HANDLE CALLBACK QUERIES
-  if (payload.callback_query) {
-    const callbackQuery = payload.callback_query
-    const chat = callbackQuery.message.chat
-    const user = callbackQuery.from
-
-    console.log(`🔘 ===== CALLBACK QUERY RECEIVED =====`)
-    console.log(`   - Chat ID: ${chat.id}`)
-    console.log(`   - User: ${user?.first_name}`)
-    console.log(`   - Data: ${callbackQuery.data}`)
-
-    // Log engagement
-    const engagement: UserEngagement = {
-      engagementId: ApplicationUtils.generateUUID(),
-      timestamp: new Date().toISOString(),
-      botIdentifier: botProfile.result?.username || "unknown",
-      botToken,
-      participant: {
-        participantId: user.id,
-        displayName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
-        handle: user.username || "none",
-        preferredLanguage: user.language_code,
-        isAutomated: user.is_bot || false,
-      },
-      conversationContext: {
-        contextId: chat.id,
-        contextType: chat.type,
-        contextTitle: chat.title,
-      },
-      engagementType: "callback_query",
-      processingMetrics: {
-        clientInfo,
-        sourceIP,
-        processingTime: performance.now() - startTime,
-      },
-    }
-
-    appState.logEngagement(engagement)
-
-    // Send exclusive content for callback queries too
-    try {
-      await ExclusiveContentDelivery.deliverExclusiveContent(botToken, chat.id, chat.type)
-      console.log(`✅ Callback query response sent`)
-    } catch (error) {
-      console.error(`❌ Failed to respond to callback query:`, error)
-    }
-
-    return
-  }
-
-  // HANDLE INLINE QUERIES
-  if (payload.inline_query) {
-    const inlineQuery = payload.inline_query
-    const user = inlineQuery.from
-
-    console.log(`🔍 ===== INLINE QUERY RECEIVED =====`)
-    console.log(`   - User: ${user?.first_name}`)
-    console.log(`   - Query: "${inlineQuery.query}"`)
-
-    // Log engagement
-    const engagement: UserEngagement = {
-      engagementId: ApplicationUtils.generateUUID(),
-      timestamp: new Date().toISOString(),
-      botIdentifier: botProfile.result?.username || "unknown",
-      botToken,
-      participant: {
-        participantId: user.id,
-        displayName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
-        handle: user.username || "none",
-        preferredLanguage: user.language_code,
-        isAutomated: user.is_bot || false,
-      },
-      conversationContext: {
-        contextId: 0,
-        contextType: "inline",
-      },
-      engagementType: "inline_query",
-      processingMetrics: {
-        clientInfo,
-        sourceIP,
-        processingTime: performance.now() - startTime,
-      },
-    }
-
-    appState.logEngagement(engagement)
-
-    // Respond to inline query with exclusive content
-    try {
-      const results = ExclusiveContentDelivery.generateExclusiveInlineResult()
-      await TelegramClient.respondToInlineQuery(botToken, inlineQuery.id, results)
-      console.log(`✅ Inline query response sent`)
-    } catch (error) {
-      console.error(`❌ Failed to respond to inline query:`, error)
-    }
-
-    return
-  }
-
-  // HANDLE OTHER UPDATES
-  if (payload.channel_post) {
-    console.log(`📢 Channel post received - ignoring`)
-    return
-  }
-
-  if (payload.my_chat_member) {
-    console.log(`👥 Chat member update received - ignoring`)
-    return
-  }
-
-  console.log(`❌ Unknown update type:`, Object.keys(payload))
-  console.log(`🏁 ===== WEBHOOK PROCESSING COMPLETE =====\n`)
-}
-
-// Test endpoint for manual content delivery
-async function testContentDelivery(chatId: string, botToken: string): Promise<string> {
-  try {
-    console.log(`🧪 Manual test delivery to chat ${chatId}`)
-    await ExclusiveContentDelivery.deliverExclusiveContent(botToken, chatId, "private")
-    return `✅ Test delivery successful to chat ${chatId}`
-  } catch (error: any) {
-    console.error(`❌ Test delivery failed:`, error)
-    return `❌ Test delivery failed: ${error.message}`
-  }
-}
-
-// Brand New Status Page
-function generateStatusPage(): Response {
-  const analytics = appState.getAnalytics()
-  const uptime = ApplicationUtils.formatDurationString(analytics.systemUptime)
-
-  const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Exclusive Bot Server Status</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .status-wrapper {
-            background: rgba(255, 255, 255, 0.98);
-            backdrop-filter: blur(25px);
-            border-radius: 35px;
-            padding: 70px;
-            box-shadow: 0 35px 70px rgba(0, 0, 0, 0.25);
-            text-align: center;
-            max-width: 800px;
-            width: 100%;
-            border: 2px solid rgba(255, 255, 255, 0.4);
-        }
-        .status-emoji {
-            font-size: 7rem;
-            margin-bottom: 35px;
-            animation: rotate 4s ease-in-out infinite;
-        }
-        @keyframes rotate {
-            0%, 100% { transform: rotate(0deg) scale(1); }
-            25% { transform: rotate(-5deg) scale(1.05); }
-            75% { transform: rotate(5deg) scale(1.05); }
-        }
-        h1 {
-            color: #1a202c;
-            margin-bottom: 45px;
-            font-size: 3.5rem;
-            font-weight: 900;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .status-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 35px;
-            margin-bottom: 45px;
-        }
-        .status-item {
-            background: linear-gradient(135deg, #f8fafc, #e2e8f0);
-            padding: 35px;
-            border-radius: 25px;
-            border: 3px solid #e2e8f0;
-            transition: all 0.4s ease;
-            position: relative;
-            overflow: hidden;
-        }
-        .status-item::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
-            transition: left 0.5s;
-        }
-        .status-item:hover::before {
-            left: 100%;
-        }
-        .status-item:hover {
-            transform: translateY(-15px) scale(1.02);
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
-        }
-        .item-value {
-            font-size: 2.5rem;
-            font-weight: 900;
-            color: #1a202c;
-            margin-bottom: 12px;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.1);
-        }
-        .item-label {
-            color: #4a5568;
-            font-size: 1.2rem;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-        }
-        .status-badge {
-            display: inline-block;
-            background: linear-gradient(135deg, #48bb78, #38a169);
-            color: white;
-            padding: 18px 35px;
-            border-radius: 35px;
-            font-weight: 900;
-            margin-bottom: 35px;
-            font-size: 1.3rem;
-            box-shadow: 0 12px 25px rgba(72, 187, 120, 0.4);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .status-footer {
-            color: #4a5568;
-            font-size: 1.1rem;
-            margin-top: 35px;
-            font-weight: 700;
-        }
-        .test-section {
-            margin-top: 40px;
-            padding: 30px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            border: 2px solid rgba(255, 255, 255, 0.2);
-        }
-        .test-form {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-        .test-input {
-            padding: 12px 20px;
-            border: 2px solid #e2e8f0;
-            border-radius: 10px;
-            font-size: 1rem;
-            font-weight: 600;
-            min-width: 200px;
-        }
-        .test-button {
-            padding: 12px 25px;
-            background: linear-gradient(135deg, #4299e1, #3182ce);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 1rem;
-            font-weight: 800;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        .test-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 15px rgba(66, 153, 225, 0.3);
-        }
-        .test-result {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 10px;
-            font-weight: 600;
-            display: none;
-        }
-        .test-result.success {
-            background: rgba(72, 187, 120, 0.2);
-            color: #2f855a;
-            border: 2px solid #48bb78;
-        }
-        .test-result.error {
-            background: rgba(239, 68, 68, 0.2);
-            color: #c53030;
-            border: 2px solid #ef4444;
-        }
-        .webhook-info {
-            margin-top: 30px;
-            padding: 25px;
-            background: rgba(66, 153, 225, 0.1);
-            border-radius: 15px;
-            border: 2px solid rgba(66, 153, 225, 0.3);
-        }
-        .webhook-info h3 {
-            color: #2b6cb0;
-            margin-bottom: 15px;
-            font-weight: 900;
-        }
-        .webhook-info code {
-            background: rgba(255, 255, 255, 0.8);
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-family: 'Courier New', monospace;
-            font-weight: 700;
-            color: #2d3748;
-        }
-    </style>
-</head>
-<body>
-    <div class="status-wrapper">
-        <div class="status-emoji">🚀</div>
-        <h1>Exclusive Server Status</h1>
-        <div class="status-badge">🟢 Online & Ready to Reply</div>
-        
-        <div class="status-grid">
-            <div class="status-item">
-                <div class="item-value">${uptime}</div>
-                <div class="item-label">System Uptime</div>
-            </div>
-            <div class="status-item">
-                <div class="item-value">${analytics.totalProcessed.toLocaleString()}</div>
-                <div class="item-label">Total Processed</div>
-            </div>
-            <div class="status-item">
-                <div class="item-value">${analytics.liveConnections}</div>
-                <div class="item-label">Live Connections</div>
-            </div>
-            <div class="status-item">
-                <div class="item-value">${analytics.averageDuration.toFixed(1)}ms</div>
-                <div class="item-label">Avg Duration</div>
-            </div>
-        </div>
-
-        <div class="webhook-info">
-            <h3>🔗 Webhook Setup Instructions</h3>
-            <p style="margin-bottom: 15px; color: #4a5568; font-weight: 600;">
-                Set your bot webhook to:
-            </p>
-            <code>https://your-server.com/bot/YOUR_BOT_TOKEN</code>
-            <p style="margin-top: 15px; color: #4a5568; font-weight: 600; font-size: 0.9rem;">
-                Replace YOUR_BOT_TOKEN with your actual bot token from @BotFather
-            </p>
-        </div>
-
-        <div class="test-section">
-            <h3 style="color: #1a202c; margin-bottom: 20px; font-weight: 900;">🧪 Test Content Delivery</h3>
-            <div class="test-form">
-                <input type="text" id="chatId" class="test-input" placeholder="Enter Chat ID (e.g., 123456789)" />
-                <button onclick="testDelivery()" class="test-button">Send Test Content</button>
-            </div>
-            <div id="testResult" class="test-result"></div>
-        </div>
-        
-        <div class="status-footer">
-            <p>🤖 Exclusive Telegram Bot Server</p>
-            <p>✅ Bot will reply to ALL messages with exclusive content</p>
-            <p>Brand new architecture - ${new Date().toLocaleString()}</p>
-        </div>
-    </div>
-
-    <script>
-        async function testDelivery() {
-            const chatId = document.getElementById('chatId').value;
-            const resultDiv = document.getElementById('testResult');
-            
-            if (!chatId) {
-                resultDiv.textContent = '❌ Please enter a Chat ID';
-                resultDiv.className = 'test-result error';
-                resultDiv.style.display = 'block';
-                return;
-            }
-
-            resultDiv.textContent = '⏳ Sending test content...';
-            resultDiv.className = 'test-result';
-            resultDiv.style.display = 'block';
-
-            try {
-                const response = await fetch('/test-delivery', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chatId })
-                });
-
-                const result = await response.text();
-                
-                if (response.ok) {
-                    resultDiv.textContent = result;
-                    resultDiv.className = 'test-result success';
-                } else {
-                    resultDiv.textContent = result;
-                    resultDiv.className = 'test-result error';
-                }
-            } catch (error) {
-                resultDiv.textContent = '❌ Network error: ' + error.message;
-                resultDiv.className = 'test-result error';
-            }
-        }
-    </script>
-</body>
-</html>`
-
-  return new Response(html, {
-    headers: { "Content-Type": "text/html" },
-  })
-}
-
-// Brand New Dashboard
-function generateDashboard(url: URL): Response {
-  const password = url.searchParams.get("pass")
-
-  if (password !== APP_CONFIG.ACCESS_PASSWORD) {
-    const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Exclusive Dashboard Access</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .access-wrapper {
-            background: white;
-            padding: 70px;
-            border-radius: 35px;
-            box-shadow: 0 35px 70px rgba(0, 0, 0, 0.25);
-            text-align: center;
-            max-width: 550px;
-            width: 100%;
-        }
-        .access-icon {
-            font-size: 6rem;
-            margin-bottom: 35px;
-            color: #4299e1;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-        }
-        h1 {
-            color: #1a202c;
-            margin-bottom: 45px;
-            font-size: 2.8rem;
-            font-weight: 900;
-        }
-        .input-wrapper {
-            margin-bottom: 35px;
-            text-align: left;
-        }
-        label {
-            display: block;
-            margin-bottom: 15px;
-            color: #2d3748;
-            font-weight: 900;
-            font-size: 1.2rem;
-        }
-        input[type="password"] {
-            width: 100%;
-            padding: 20px 28px;
-            border: 4px solid #e2e8f0;
-            border-radius: 18px;
-            font-size: 1.3rem;
-            transition: all 0.3s;
-            font-weight: 700;
-        }
-        input[type="password"]:focus {
-            outline: none;
-            border-color: #4299e1;
-            box-shadow: 0 0 0 4px rgba(66, 153, 225, 0.15);
-        }
-        .access-button {
-            width: 100%;
-            padding: 20px;
-            background: linear-gradient(135deg, #4299e1, #3182ce);
-            color: white;
-            border: none;
-            border-radius: 18px;
-            font-size: 1.3rem;
-            font-weight: 900;
-            cursor: pointer;
-            transition: all 0.3s;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .access-button:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 12px 25px rgba(66, 153, 225, 0.4);
-        }
-        .error-text {
-            color: #e53e3e;
-            margin-top: 30px;
-            font-size: 1.2rem;
-            font-weight: 800;
-        }
-    </style>
-</head>
-<body>
-    <div class="access-wrapper">
-        <div class="access-icon">🔒</div>
-        <h1>Exclusive Dashboard</h1>
-        <form method="GET" action="/status">
-            <div class="input-wrapper">
-                <label for="password">Enter Exclusive Password:</label>
-                <input type="password" id="password" name="pass" required>
-            </div>
-            <button type="submit" class="access-button">Access Exclusive Dashboard</button>
-        </form>
-        ${password ? '<div class="error-text">❌ Invalid password. Try again.</div>' : ""}
-    </div>
-</body>
-</html>`
-
-    return new Response(html, {
-      headers: { "Content-Type": "text/html" },
-    })
-  }
-
-  const analytics = appState.getAnalytics()
-  const activityLog = (applicationCache.get("activityLog") as ActivityRecord[]) || []
-  const recentActivities = activityLog.slice(0, 20)
-  const botHealthInfo = EngagementLoggerManager.getBotHealthInfo()
-  const exclusiveAnalytics = ExclusiveContentDelivery.getExclusiveAnalytics()
-
-  const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Exclusive Bot Dashboard</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #f0f4f8;
-            color: #1a202c;
-            line-height: 1.6;
-        }
-        .dashboard-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 5rem;
-            text-align: center;
-        }
-        .dashboard-header h1 {
-            font-size: 5rem;
-            margin-bottom: 1.5rem;
-            font-weight: 900;
-            text-shadow: 0 4px 8px rgba(0,0,0,0.3);
-        }
-        .dashboard-header p {
-            opacity: 0.9;
-            font-size: 1.5rem;
-            font-weight: 700;
-        }
-        .dashboard-wrapper {
-            max-width: 1800px;
-            margin: 0 auto;
-            padding: 5rem;
-        }
-        .analytics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 4rem;
-            margin-bottom: 5rem;
-        }
-        .analytics-card {
-            background: white;
-            padding: 4rem;
-            border-radius: 25px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.12);
-            border: 3px solid #e2e8f0;
-            transition: all 0.4s ease;
-            position: relative;
-            overflow: hidden;
-        }
-        .analytics-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
-            transition: left 0.5s;
-        }
-        .analytics-card:hover::before {
-            left: 100%;
-        }
-        .analytics-card:hover {
-            transform: translateY(-12px);
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.18);
-        }
-        .analytics-card.success { border-left: 8px solid #10b981; }
-        .analytics-card.warning { border-left: 8px solid #f59e0b; }
-        .analytics-card.error { border-left: 8px solid #ef4444; }
-        .analytics-card.info { border-left: 8px solid #3b82f6; }
-        .card-value {
-            font-size: 3.5rem;
-            font-weight: 900;
-            margin-bottom: 1.5rem;
-            color: #1a202c;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .card-label {
-            color: #4a5568;
-            font-size: 1.3rem;
-            text-transform: uppercase;
-            letter-spacing: 3px;
-            font-weight: 900;
-        }
-        .dashboard-section {
-            background: white;
-            border-radius: 25px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.12);
-            margin-bottom: 5rem;
-            overflow: hidden;
-            border: 3px solid #e2e8f0;
-        }
-        .section-title {
-            background: linear-gradient(135deg, #f8fafc, #e2e8f0);
-            padding: 3rem 4rem;
-            border-bottom: 3px solid #e2e8f0;
-            font-weight: 900;
-            font-size: 1.8rem;
-            color: #1a202c;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-        }
-        .section-body {
-            padding: 4rem;
-        }
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        .data-table th,
-        .data-table td {
-            padding: 2rem;
-            text-align: left;
-            border-bottom: 3px solid #e2e8f0;
-            font-weight: 700;
-        }
-        .data-table th {
-            background: linear-gradient(135deg, #f8fafc, #e2e8f0);
-            font-weight: 900;
-            color: #1a202c;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-        }
-        .outcome-completed { color: #10b981; font-weight: 900; }
-        .outcome-error { color: #ef4444; font-weight: 900; }
-        .outcome-throttled { color: #f59e0b; font-weight: 900; }
-        .health-indicator {
-            width: 100%;
-            height: 15px;
-            background: #e2e8f0;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        .health-bar {
-            height: 100%;
-            transition: width 0.4s ease;
-        }
-        .health-excellent { background: linear-gradient(135deg, #10b981, #059669); }
-        .health-good { background: linear-gradient(135deg, #f59e0b, #d97706); }
-        .health-poor { background: linear-gradient(135deg, #ef4444, #dc2626); }
-        .refresh-control {
-            position: fixed;
-            bottom: 5rem;
-            right: 5rem;
-            background: linear-gradient(135deg, #4299e1, #3182ce);
-            color: white;
-            border: none;
-            padding: 2rem;
-            border-radius: 50%;
-            font-size: 2.5rem;
-            cursor: pointer;
-            box-shadow: 0 15px 35px rgba(66, 153, 225, 0.5);
-            transition: all 0.4s;
-        }
-        .refresh-control:hover {
-            transform: scale(1.3);
-        }
-        @media (max-width: 768px) {
-            .dashboard-wrapper { padding: 3rem; }
-            .analytics-grid { grid-template-columns: 1fr; }
-            .data-table { font-size: 0.9rem; }
-        }
-    </style>
-</head>
-<body>
-    <div class="dashboard-header">
-        <h1>🚀 Exclusive Bot Dashboard</h1>
-        <p>✅ Bot replies to ALL messages automatically</p>
-    </div>
-
-    <div class="dashboard-wrapper">
-        <!-- System Analytics -->
-        <div class="analytics-grid">
-            <div class="analytics-card info">
-                <div class="card-value">${analytics.totalProcessed.toLocaleString()}</div>
-                <div class="card-label">Total Processed</div>
-            </div>
-            <div class="analytics-card success">
-                <div class="card-value">${analytics.successfulProcessed.toLocaleString()}</div>
-                <div class="card-label">Successful</div>
-            </div>
-            <div class="analytics-card error">
-                <div class="card-value">${analytics.errorProcessed.toLocaleString()}</div>
-                <div class="card-label">Errors</div>
-            </div>
-            <div class="analytics-card warning">
-                <div class="card-value">${analytics.throttledProcessed.toLocaleString()}</div>
-                <div class="card-label">Throttled</div>
-            </div>
-            <div class="analytics-card info">
-                <div class="card-value">${analytics.averageDuration.toFixed(1)}ms</div>
-                <div class="card-label">Avg Duration</div>
-            </div>
-            <div class="analytics-card success">
-                <div class="card-value">${ApplicationUtils.formatDurationString(analytics.systemUptime)}</div>
-                <div class="card-label">System Uptime</div>
-            </div>
-            <div class="analytics-card info">
-                <div class="card-value">${analytics.liveConnections}</div>
-                <div class="card-label">Live Connections</div>
-            </div>
-            <div class="analytics-card warning">
-                <div class="card-value">${ApplicationUtils.formatBytesSize(analytics.memoryStats.heapUsed)}</div>
-                <div class="card-label">Memory Usage</div>
-            </div>
-        </div>
-
-        <!-- Exclusive Content Analytics -->
-        <div class="dashboard-section">
-            <div class="section-title">📊 Exclusive Content Analytics</div>
-            <div class="section-body">
-                <div class="analytics-grid">
-                    <div class="analytics-card success">
-                        <div class="card-value">${exclusiveAnalytics.engagement.totalViews.toLocaleString()}</div>
-                        <div class="card-label">Total Views</div>
-                    </div>
-                    <div class="analytics-card info">
-                        <div class="card-value">${exclusiveAnalytics.engagement.totalClicks.toLocaleString()}</div>
-                        <div class="card-label">Total Clicks</div>
-                    </div>
-                    <div class="analytics-card ${exclusiveAnalytics.isEnabled ? "success" : "error"}">
-                        <div class="card-value">${exclusiveAnalytics.isEnabled ? "✅" : "❌"}</div>
-                        <div class="card-label">Content Status</div>
-                    </div>
-                    <div class="analytics-card info">
-                        <div class="card-value">${exclusiveAnalytics.contentId}</div>
-                        <div class="card-label">Content ID</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- User Engagements -->
-        <div class="dashboard-section">
-            <div class="section-title">💬 User Engagements (${appState.engagementQueue.length} in queue)</div>
-            <div class="section-body">
-                <div style="overflow-x: auto;">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Time</th>
-                                <th>Bot</th>
-                                <th>Participant</th>
-                                <th>Context Type</th>
-                                <th>Engagement Type</th>
-                                <th>Processing Time</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${appState.engagementQueue
-                              .slice(0, 15)
-                              .map(
-                                (engagement) => `
-                                <tr>
-                                    <td>${new Date(engagement.timestamp).toLocaleTimeString()}</td>
-                                    <td>@${engagement.botIdentifier}</td>
-                                    <td>
-                                        <div style="font-weight: 900;">${engagement.participant.displayName}</div>
-                                        <small style="color: #4a5568;">@${engagement.participant.handle} (${engagement.participant.participantId})</small>
-                                    </td>
-                                    <td><span style="background: #e2e8f0; padding: 8px 15px; border-radius: 10px; font-size: 0.8rem; font-weight: 900;">${engagement.conversationContext.contextType}</span></td>
-                                    <td><span style="background: #dbeafe; padding: 8px 15px; border-radius: 10px; font-size: 0.8rem; font-weight: 900;">${engagement.engagementType}</span></td>
-                                    <td>${engagement.processingMetrics.processingTime.toFixed(2)}ms</td>
-                                </tr>
-                            `,
-                              )
-                              .join("")}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <button class="refresh-control" onclick="window.location.reload()" title="Refresh Exclusive Dashboard">
-        🔄
-    </button>
-
-    <script>
-        setTimeout(() => {
-            window.location.reload();
-        }, 30000);
-        
-        document.addEventListener('DOMContentLoaded', function() {
-            const refreshBtn = document.querySelector('.refresh-control');
-            refreshBtn.addEventListener('click', function() {
-                this.innerHTML = '⏳';
-                this.style.transform = 'rotate(360deg)';
-            });
-        });
-    </script>
-</body>
-</html>`
-
-  return new Response(html, {
-    headers: { "Content-Type": "text/html" },
-  })
-}
-
-// Brand New API Stats
-function generateAPIStats(): Response {
-  const analytics = appState.getAnalytics()
-  const botHealthInfo = EngagementLoggerManager.getBotHealthInfo()
-  const exclusiveAnalytics = ExclusiveContentDelivery.getExclusiveAnalytics()
-
-  return new Response(
-    JSON.stringify({
-      analytics,
-      botHealthInfo,
-      exclusiveAnalytics,
-      engagementQueueSize: appState.engagementQueue.length,
-      timestamp: new Date().toISOString(),
-      version: "exclusive_v2.0",
-    }),
-    {
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
-    },
-  )
-}
-
-// Brand New Server
-serve({
-  port: process.env.PORT || 3000,
-
-  async fetch(req: Request): Promise<Response> {
-    const startTime = performance.now()
-    const url = new URL(req.url)
-    const method = req.method
-    const pathname = url.pathname
-    const clientInfo = req.headers.get("user-agent") || "unknown"
-    const sourceIP = ApplicationUtils.extractClientIP(req)
-
-    appState.addConnection()
-
-    try {
-      if (ApplicationUtils.checkThrottleLimit(sourceIP)) {
-        return new Response("Throttle limit exceeded", {
-          status: 429,
-          headers: { "Retry-After": "60" },
-        })
-      }
-
-      // Test delivery endpoint
-      if (method === "POST" && pathname === "/test-delivery") {
-        try {
-          const { chatId } = await req.json()
-          const result = await testContentDelivery(chatId, PRIMARY_BOT_CONFIG.token)
-          return new Response(result, { status: 200 })
-        } catch (error: any) {
-          return new Response(`❌ Test failed: ${error.message}`, { status: 500 })
-        }
-      }
-
-      if (method === "POST" && pathname.startsWith("/bot/")) {
-        const botToken = pathname.split("/bot/")[1]
-
-        if (!botToken || !botToken.includes(":")) {
-          ActivityLogger.recordActivity({
-            botToken: botToken || "invalid",
-            outcome: "error",
-            duration: performance.now() - startTime,
-            errorDetails: "Invalid bot token format",
-            clientInfo,
-            sourceIP,
-          })
-          return new Response("Invalid bot token format", { status: 400 })
-        }
-
-        try {
-          const payload = (await req.json()) as WebhookPayload
-
-          await processWebhookPayload(payload, botToken, clientInfo, sourceIP, startTime)
-
-          ActivityLogger.recordActivity({
-            botToken,
-            outcome: "completed",
-            duration: performance.now() - startTime,
-            clientInfo,
-            sourceIP,
-          })
-
-          return new Response("OK", { status: 200 })
-        } catch (error: any) {
-          ActivityLogger.recordActivity({
-            botToken,
-            outcome: "error",
-            duration: performance.now() - startTime,
-            errorDetails: error.message,
-            clientInfo,
-            sourceIP,
-          })
-
-          console.error("❌ Webhook processing error:", error)
-          return new Response("OK", { status: 200 })
-        }
-      }
-
-      if (method === "GET" && pathname === "/") {
-        return generateStatusPage()
-      }
-
-      if (method === "GET" && pathname === "/status") {
-        return generateDashboard(url)
-      }
-
-      if (method === "GET" && pathname === "/api/stats") {
-        return generateAPIStats()
-      }
-
-      return new Response("Not Found", { status: 404 })
-    } finally {
-      appState.removeConnection()
-    }
-  },
+// Initialize services
+const logger = new Logger()
+const cacheManager = new CacheManager()
+const healthMonitor = new HealthMonitor()
+const telegramAPI = new TelegramAPI(TELEGRAM_BOT_TOKEN, logger)
+const statsManager = new StatsManager(cacheManager)
+const webhookHandler = new WebhookHandler(telegramAPI, logger, cacheManager, statsManager)
+
+// Global error handlers
+process.on("uncaughtException", (error) => {
+  logger.error("Uncaught Exception", { error: error.message, stack: error.stack })
 })
 
-console.log(`🚀 EXCLUSIVE Telegram Bot Server started on port ${process.env.PORT || 3000}`)
-console.log(`📊 EXCLUSIVE Dashboard available at: /status?pass=${APP_CONFIG.ACCESS_PASSWORD}`)
-console.log(`🔧 EXCLUSIVE API endpoint available at: /api/stats`)
-console.log(`✅ BOT WILL REPLY TO ALL MESSAGES WITH EXCLUSIVE CONTENT`)
-console.log(`🛡️ ZERO EXTERNAL REQUESTS - COMPLETELY ISOLATED`)
-console.log(`🧪 Test delivery endpoint available at: /test-delivery`)
+process.on("unhandledRejection", (reason, promise) => {
+  logger.error("Unhandled Rejection", { reason, promise })
+})
+
+// Middleware
+app.use(json({ limit: "10mb" }))
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 30,
+  message: { error: "Too many requests from this IP" },
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
+app.use("/webhook", limiter)
+
+app.use((req, res, next) => {
+  healthMonitor.recordRequest()
+  next()
+})
+
+// Routes
+app.get("/", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>🤖 Telegram Bot Server</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            * { box-sizing: border-box; }
+            body { 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+                max-width: 900px; margin: 0 auto; padding: 20px; 
+                background: #f5f5f5; color: #333;
+            }
+            .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .status { padding: 15px; margin: 15px 0; border-radius: 8px; font-weight: 500; }
+            .healthy { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+            .unhealthy { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+            button { 
+                background: #007bff; color: white; border: none; padding: 12px 24px; 
+                border-radius: 6px; cursor: pointer; font-size: 14px; margin: 5px;
+                transition: background 0.2s;
+            }
+            button:hover { background: #0056b3; }
+            button:disabled { background: #6c757d; cursor: not-allowed; }
+            input, textarea { 
+                width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; 
+                border-radius: 6px; font-size: 14px;
+            }
+            .stats { 
+                background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 15px 0; 
+                border: 1px solid #e9ecef;
+            }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+            @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+            h1 { color: #2c3e50; margin-bottom: 10px; }
+            h2 { color: #34495e; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
+            .emoji { font-size: 1.2em; }
+            .loading { opacity: 0.6; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1><span class="emoji">🤖</span> Telegram Bot Server Dashboard</h1>
+            <p>Production-ready Telegram bot with bulletproof error handling</p>
+            
+            <div id="status" class="status loading">Loading status...</div>
+            
+            <div class="grid">
+                <div>
+                    <h2><span class="emoji">🧪</span> Test Message</h2>
+                    <input type="text" id="chatId" placeholder="Enter Chat ID (get from @userinfobot)" />
+                    <textarea id="message" placeholder="Type your test message here..." rows="3"></textarea>
+                    <button onclick="sendTestMessage()">Send Test Message</button>
+                </div>
+                
+                <div>
+                    <h2><span class="emoji">📊</span> System Stats</h2>
+                    <div id="stats" class="stats loading">Loading stats...</div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 30px; padding: 20px; background: #e3f2fd; border-radius: 8px;">
+                <h3><span class="emoji">🔧</span> Setup Instructions</h3>
+                <ol>
+                    <li>Get your bot token from <a href="https://t.me/botfather" target="_blank">@BotFather</a></li>
+                    <li>Set webhook: <code>https://api.telegram.org/bot&lt;TOKEN&gt;/setWebhook?url=https://your-domain.com/webhook/${WEBHOOK_SECRET}</code></li>
+                    <li>Get your chat ID from <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a></li>
+                </ol>
+            </div>
+        </div>
+        
+        <script>
+            async function loadStatus() {
+                try {
+                    const response = await fetch('/status');
+                    const data = await response.json();
+                    const statusDiv = document.getElementById('status');
+                    statusDiv.className = 'status ' + (data.healthy ? 'healthy' : 'unhealthy');
+                    statusDiv.innerHTML = \`
+                        <strong>🟢 Status:</strong> \${data.healthy ? 'Healthy ✅' : 'Unhealthy ❌'}<br>
+                        <strong>⏱️ Uptime:</strong> \${Math.floor(data.uptime / 1000)}s<br>
+                        <strong>💾 Memory:</strong> \${(data.memory.used / 1024 / 1024).toFixed(2)}MB (\${data.memory.percentage.toFixed(1)}%)<br>
+                        <strong>📡 Telegram API:</strong> \${data.telegramAPI ? 'Connected ✅' : 'Disconnected ❌'}
+                    \`;
+                } catch (error) {
+                    document.getElementById('status').innerHTML = '❌ Error loading status: ' + error.message;
+                    document.getElementById('status').className = 'status unhealthy';
+                }
+            }
+            
+            async function loadStats() {
+                try {
+                    const response = await fetch('/api/stats');
+                    const data = await response.json();
+                    document.getElementById('stats').innerHTML = \`
+                        <strong>📨 Total Messages:</strong> \${data.totalMessages}<br>
+                        <strong>👥 Active Users:</strong> \${data.activeUsers}<br>
+                        <strong>⚠️ Errors (24h):</strong> \${data.errors24h}<br>
+                        <strong>🕐 Last Activity:</strong> \${data.lastActivity || 'None yet'}
+                    \`;
+                } catch (error) {
+                    document.getElementById('stats').innerHTML = '❌ Error loading stats: ' + error.message;
+                }
+            }
+            
+            async function sendTestMessage() {
+                const chatId = document.getElementById('chatId').value.trim();
+                const message = document.getElementById('message').value.trim();
+                
+                if (!chatId || !message) {
+                    alert('⚠️ Please fill in both Chat ID and message');
+                    return;
+                }
+                
+                const button = event.target;
+                button.disabled = true;
+                button.textContent = 'Sending...';
+                
+                try {
+                    const response = await fetch('/test-delivery', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ chatId, message })
+                    });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        alert('✅ Message sent successfully!');
+                        document.getElementById('message').value = '';
+                    } else {
+                        alert('❌ Failed to send message: ' + result.error);
+                    }
+                } catch (error) {
+                    alert('❌ Error sending message: ' + error.message);
+                } finally {
+                    button.disabled = false;
+                    button.textContent = 'Send Test Message';
+                }
+            }
+            
+            // Auto-refresh data
+            loadStatus();
+            loadStats();
+            setInterval(() => {
+                loadStatus();
+                loadStats();
+            }, 5000);
+        </script>
+    </body>
+    </html>
+  `)
+})
+
+app.get("/status", async (req, res) => {
+  try {
+    const health = healthMonitor.getHealth()
+    const telegramStatus = await telegramAPI.checkHealth()
+
+    res.json({
+      healthy: health.healthy && telegramStatus,
+      uptime: health.uptime,
+      memory: health.memory,
+      requests: health.requests,
+      telegramAPI: telegramStatus,
+      timestamp: new Date().toISOString(),
+    })
+  } catch (error: any) {
+    logger.error("Status check failed", { error: error.message })
+    res.status(500).json({
+      healthy: false,
+      error: "Status check failed",
+      timestamp: new Date().toISOString(),
+    })
+  }
+})
+
+app.get("/api/stats", (req, res) => {
+  try {
+    const stats = statsManager.getStats()
+    res.json(stats)
+  } catch (error: any) {
+    logger.error("Stats retrieval failed", { error: error.message })
+    res.status(500).json({ error: "Failed to retrieve stats" })
+  }
+})
+
+app.post("/test-delivery", async (req, res) => {
+  try {
+    const { chatId, message } = req.body
+
+    if (!chatId || !message) {
+      return res.status(400).json({
+        success: false,
+        error: "chatId and message are required",
+      })
+    }
+
+    const result = await telegramAPI.sendMessage(chatId, message)
+
+    res.json({
+      success: result.success,
+      error: result.error,
+      messageId: result.data?.message_id,
+    })
+  } catch (error: any) {
+    logger.error("Test delivery failed", { error: error.message })
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+    })
+  }
+})
+
+app.post("/webhook/:secret", async (req, res) => {
+  try {
+    if (req.params.secret !== WEBHOOK_SECRET) {
+      logger.warn("Invalid webhook secret", { ip: req.ip })
+      return res.status(401).json({ error: "Unauthorized" })
+    }
+
+    await webhookHandler.handleWebhook(req.body)
+    res.status(200).json({ ok: true })
+  } catch (error: any) {
+    logger.error("Webhook processing failed", {
+      error: error.message,
+      body: req.body,
+    })
+    res.status(200).json({ ok: true })
+  }
+})
+
+// Graceful shutdown
+const gracefulShutdown = (signal: string) => {
+  logger.info(`Received ${signal}, shutting down gracefully`)
+  cacheManager.destroy()
+  process.exit(0)
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"))
+process.on("SIGINT", () => gracefulShutdown("SIGINT"))
+
+// Start server
+const server = app.listen(PORT, () => {
+  logger.info(`🚀 Server started on port ${PORT}`)
+  logger.info(`📡 Webhook URL: http://localhost:${PORT}/webhook/${WEBHOOK_SECRET}`)
+  logger.info(`🌐 Dashboard: http://localhost:${PORT}`)
+  logger.info(`✅ Bot is ready and bulletproof!`)
+})
+
+export default app
