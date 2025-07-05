@@ -64,54 +64,63 @@ serve({
     const path = url.pathname;
     const method = req.method;
 
-    if (method === "GET") {
-      return new Response("✅ Webhook is live and running!", {
+    // Health check for root
+    if (method === "GET" && path === "/") {
+      return new Response("✅ Webhook root is live and running!", {
         status: 200,
         headers: { "Content-Type": "text/plain" },
       });
     }
 
-    if (!path.startsWith("/webhook/")) {
-      return new Response("Not Found", { status: 404 });
+    // Handle GET request on /webhook/:token for confirmation
+    if (method === "GET" && path.startsWith("/webhook/")) {
+      const botToken = path.replace("/webhook/", "");
+      if (!botToken || !botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) {
+        return new Response("Invalid bot token format", { status: 403 });
+      }
+      return new Response(`✅ Webhook for bot ${botToken.slice(0, 8)}... is live!`, {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      });
     }
 
-    const botToken = path.replace("/webhook/", "");
-
-    if (method !== "POST") {
-      return new Response("Only POST supported", { status: 405 });
-    }
-
-    if (!botToken || !botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) {
-      return new Response("Invalid bot token format", { status: 403 });
-    }
-
-    try {
-      const update: TelegramUpdate = await req.json();
-
-      if (!update.message || !update.message.chat?.id) {
-        return new Response("Invalid Telegram update", { status: 200 });
+    // Handle Telegram webhook POST
+    if (method === "POST" && path.startsWith("/webhook/")) {
+      const botToken = path.replace("/webhook/", "");
+      if (!botToken || !botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) {
+        return new Response("Invalid bot token format", { status: 403 });
       }
 
-      const chatId = update.message.chat.id;
-      const html = buildTelegramHTML(EXCLUSIVE_CONTENT);
+      try {
+        const update: TelegramUpdate = await req.json();
 
-      const telegramApi = `https://api.telegram.org/bot${botToken}/sendMessage`;
-      await fetch(telegramApi, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: html,
-          parse_mode: "HTML",
-          disable_web_page_preview: false,
-        }),
-      });
+        if (!update.message || !update.message.chat?.id) {
+          return new Response("Invalid Telegram update", { status: 200 });
+        }
 
-      return new Response("Message sent", { status: 200 });
-    } catch (err) {
-      console.error("Error:", err);
-      return new Response("Internal Server Error", { status: 500 });
+        const chatId = update.message.chat.id;
+        const html = buildTelegramHTML(EXCLUSIVE_CONTENT);
+
+        const telegramApi = `https://api.telegram.org/bot${botToken}/sendMessage`;
+        await fetch(telegramApi, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: html,
+            parse_mode: "HTML",
+            disable_web_page_preview: false,
+          }),
+        });
+
+        return new Response("Message sent", { status: 200 });
+      } catch (err) {
+        console.error("Error:", err);
+        return new Response("Internal Server Error", { status: 500 });
+      }
     }
+
+    return new Response("Not Found", { status: 404 });
   },
 });
 
