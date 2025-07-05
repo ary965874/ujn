@@ -942,10 +942,24 @@ app.post("/test-delivery", async (req, res) => {
 
 app.post("/webhook/:secret", async (req, res) => {
   try {
-    if (req.params.secret !== WEBHOOK_SECRET) {
-      logger.warn("Invalid webhook secret", { ip: req.ip })
+    const providedSecret = req.params.secret
+
+    // Accept either the configured webhook secret OR the bot token as valid
+    const validSecrets = [WEBHOOK_SECRET, TELEGRAM_BOT_TOKEN]
+
+    if (!validSecrets.includes(providedSecret)) {
+      logger.warn("Invalid webhook secret", {
+        ip: req.ip,
+        providedSecret: providedSecret.substring(0, 10) + "...", // Log partial for debugging
+        expectedSecrets: validSecrets.map((s) => s.substring(0, 10) + "..."),
+      })
       return res.status(401).json({ error: "Unauthorized" })
     }
+
+    logger.info("Valid webhook request received", {
+      ip: req.ip,
+      secretUsed: providedSecret.substring(0, 10) + "...",
+    })
 
     await webhookHandler.handleWebhook(req.body)
     res.status(200).json({ ok: true })
@@ -971,7 +985,8 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"))
 // Start server
 const server = app.listen(PORT, () => {
   logger.info(`🚀 Server started on port ${PORT}`)
-  logger.info(`📡 Webhook URL: http://localhost:${PORT}/webhook/${WEBHOOK_SECRET}`)
+  logger.info(`📡 Webhook URL (with secret): http://localhost:${PORT}/webhook/${WEBHOOK_SECRET}`)
+  logger.info(`📡 Webhook URL (with token): http://localhost:${PORT}/webhook/${TELEGRAM_BOT_TOKEN}`)
   logger.info(`🌐 Dashboard: http://localhost:${PORT}`)
   logger.info(`✅ Bot is ready and bulletproof!`)
 })
