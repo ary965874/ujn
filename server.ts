@@ -23,7 +23,17 @@ interface TelegramUpdate {
   };
 }
 
+interface LogEntry {
+  time: string;
+  userId: string;
+  chatId: number;
+  botToken: string;
+  status: string;
+  error?: string;
+}
+
 const cache = new NodeCache({ stdTTL: 0 });
+const logs: LogEntry[] = [];
 
 const EXCLUSIVE_CONTENT = {
   contentId: "premium_exclusive_content_2024",
@@ -76,10 +86,11 @@ serve({
         <!DOCTYPE html>
         <html><head><title>Bot Dashboard</title>
         <style>
-          body { font-family:sans-serif; background:#f4f4f4; padding:2em; max-width:800px; margin:auto; }
+          body { font-family:sans-serif; background:#f4f4f4; padding:2em; max-width:1000px; margin:auto; }
           .card { background:white; padding:2em; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.1); }
           .title { font-size:1.4em; margin-bottom:1em; }
           ul { padding-left:1.5em; }
+          .log { font-size: 0.9em; background: #f9f9f9; padding: 1em; border-radius: 6px; max-height: 300px; overflow: auto; }
         </style></head>
         <body>
           <div class="card">
@@ -90,6 +101,10 @@ serve({
             <p><b>👥 Unique Users:</b> ${users.length}</p>
             <ul>${users.map(u => `<li>${u}</li>`).join("")}</ul>
             <img src="${EXCLUSIVE_CONTENT.imageSource}" alt="ad" width="100%" style="max-width:300px; margin-top:1em;"/>
+            <h3>📋 Recent Logs</h3>
+            <div class="log">
+              ${logs.slice(-20).reverse().map(l => `<div>[${l.time}] <b>${l.userId}</b> ➜ ${l.status} ${l.error ? `❌ ${l.error}` : "✅"}</div>`).join("")}
+            </div>
           </div>
         </body></html>
       `;
@@ -97,24 +112,17 @@ serve({
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
-    if (method === "GET" && path === "/ping") {
-      return new Response("pong", { status: 200 });
-    }
-
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
       if (!botToken || !botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) {
-        console.error("❌ Invalid bot token format", botToken);
         return new Response("Invalid bot token format", { status: 403 });
       }
 
       try {
         const rawBody = await req.text();
-        console.log("📩 Raw Telegram Webhook:", rawBody);
         const update: TelegramUpdate = JSON.parse(rawBody);
 
         if (!update.message || !update.message.chat?.id || !update.message.from?.id) {
-          console.warn("⚠️ Missing message/chat info.");
           return new Response("Invalid Telegram update", { status: 200 });
         }
 
@@ -137,11 +145,16 @@ serve({
         });
 
         const tgResult = await tgResponse.json();
-        console.log("📦 Telegram API response:", JSON.stringify(tgResult, null, 2));
+        const status = tgResult.ok ? "SENT" : "FAILED";
 
-        if (!tgResult.ok) {
-          console.error("❌ Telegram API error:", tgResult.description);
-        }
+        logs.push({
+          time: new Date().toISOString(),
+          userId,
+          chatId,
+          botToken,
+          status,
+          error: tgResult.description || ""
+        });
 
         // Update stats
         const prev = (cache.get("total_messages") as number) || 0;
@@ -156,8 +169,16 @@ serve({
         cache.set("bots", Array.from(bots));
 
         return new Response("Message sent", { status: 200 });
-      } catch (err) {
-        console.error("❌ Exception in webhook handler:", err);
+      } catch (err: any) {
+        logs.push({
+          time: new Date().toISOString(),
+          userId: "unknown",
+          chatId: 0,
+          botToken: path.replace("/webhook/", ""),
+          status: "ERROR",
+          error: err.message || "Unknown error"
+        });
+
         return new Response("Internal Server Error", { status: 500 });
       }
     }
