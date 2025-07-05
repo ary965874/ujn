@@ -1,5 +1,3 @@
-// server.ts
-
 import { serve } from "bun";
 import NodeCache from "node-cache";
 
@@ -19,22 +17,10 @@ interface TelegramUpdate {
   message?: {
     chat: TelegramChat;
     from?: TelegramUser;
-    text?: string;
   };
 }
 
-interface LogEntry {
-  time: string;
-  userId: string;
-  chatId: number;
-  botToken: string;
-  status: string;
-  error?: string;
-  raw?: string;
-}
-
 const cache = new NodeCache({ stdTTL: 0 });
-const logs: LogEntry[] = [];
 
 const EXCLUSIVE_CONTENT = {
   contentId: "premium_exclusive_content_2024",
@@ -58,18 +44,15 @@ const EXCLUSIVE_CONTENT = {
 };
 
 serve({
-  port: Number(process.env.PORT || 3000),
+  port: 3000,
   async fetch(req) {
     const url = new URL(req.url);
     const path = url.pathname;
     const method = req.method;
+    const pass = url.searchParams.get("pass");
 
-    if (method === "GET" && path === "/ping") {
-      return new Response("pong", { status: 200 });
-    }
-
+    // Admin Dashboard
     if (method === "GET" && path === "/") {
-      const pass = url.searchParams.get("pass");
       if (pass !== "admin123") {
         return new Response(`
           <html><head><title>Login</title></head>
@@ -86,16 +69,19 @@ serve({
       const totalMessages = cache.get("total_messages") || 0;
       const users = Array.from(new Set((cache.get("users") || []) as string[]));
       const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
+      const actionLinks = EXCLUSIVE_CONTENT.actionLinks;
 
       const html = `
         <!DOCTYPE html>
         <html><head><title>Bot Dashboard</title>
         <style>
-          body { font-family:sans-serif; background:#f4f4f4; padding:2em; max-width:1000px; margin:auto; }
-          .card { background:white; padding:2em; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.1); }
-          .title { font-size:1.4em; margin-bottom:1em; }
+          body { font-family: Arial, sans-serif; background:#f9f9f9; padding:2em; }
+          .card { background:white; padding:2em; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); max-width:800px; margin:auto; }
+          .title { font-size:1.6em; margin-bottom:1em; color:#333; }
           ul { padding-left:1.5em; }
-          .log { font-size: 0.9em; background: #f9f9f9; padding: 1em; border-radius: 6px; max-height: 300px; overflow: auto; }
+          input, button { padding:0.6em; margin:0.5em 0; width:100%; box-sizing: border-box; }
+          .url-form { margin-top:2em; padding-top:1em; border-top:1px solid #eee; }
+          .action-links li { margin: 4px 0; }
         </style></head>
         <body>
           <div class="card">
@@ -105,38 +91,64 @@ serve({
             <ul>${bots.map(b => `<li>${b.slice(0, 12)}...</li>`).join("")}</ul>
             <p><b>👥 Unique Users:</b> ${users.length}</p>
             <ul>${users.map(u => `<li>${u}</li>`).join("")}</ul>
+
             <img src="${EXCLUSIVE_CONTENT.imageSource}" alt="ad" width="100%" style="max-width:300px; margin-top:1em;"/>
-            <h3>📋 Recent Logs</h3>
-            <div class="log">
-              ${logs.slice(-20).reverse().map(l => `<div>[${l.time}] <b>${l.userId}</b> ➜ ${l.status} ${l.error ? `❌ ${l.error}` : "✅"}</div>`).join("")}
+
+            <div class="url-form">
+              <h3>➕ Add New Action Link</h3>
+              <form method="POST" action="/add-link?pass=admin123">
+                <input name="linkText" placeholder="Button Text (e.g., 🎞️ NEW SERVER)" required />
+                <input name="linkDestination" placeholder="Destination URL (e.g., https://t.me/xyz)" required />
+                <button type="submit">Add Link</button>
+              </form>
+              <ul class="action-links">
+                <h4>🔗 Current Action Links:</h4>
+                ${actionLinks.map(link => `<li><b>${link.linkText}</b> ➜ <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`).join("")}
+              </ul>
             </div>
           </div>
         </body></html>
       `;
-
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
+    // Add new button link
+    if (method === "POST" && path === "/add-link") {
+      if (pass !== "admin123") {
+        return new Response("Unauthorized", { status: 403 });
+      }
+
+      const formData = await req.formData();
+      const linkText = formData.get("linkText")?.toString();
+      const linkDestination = formData.get("linkDestination")?.toString();
+
+      if (linkText && linkDestination) {
+        EXCLUSIVE_CONTENT.actionLinks.push({ linkText, linkDestination });
+      }
+
+      return new Response(
+        `<html><body><script>location.href='/?pass=admin123'</script></body></html>`,
+        { headers: { "Content-Type": "text/html" } }
+      );
+    }
+
+    // Telegram Webhook Endpoint
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
-      if (!botToken || !botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) {
+      if (!botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) {
         return new Response("Invalid bot token format", { status: 403 });
       }
 
       try {
-        const rawBody = await req.text();
-        console.log("📩 Incoming Telegram Webhook:", rawBody);
-        const update: TelegramUpdate = JSON.parse(rawBody);
+        const update: TelegramUpdate = await req.json();
+        const chatId = update.message?.chat?.id;
+        const userId = update.message?.from?.id?.toString();
 
-        if (!update.message || !update.message.chat?.id || !update.message.from?.id) {
-          return new Response("Invalid Telegram update", { status: 200 });
+        if (!chatId || !userId) {
+          return new Response("No message data", { status: 200 });
         }
 
-        const chatId = update.message.chat.id;
-        const userId = update.message.from.id.toString();
-
-        const telegramApi = `https://api.telegram.org/bot${botToken}/sendPhoto`;
-        const tgResponse = await fetch(telegramApi, {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -145,47 +157,27 @@ serve({
             caption: EXCLUSIVE_CONTENT.captionText,
             parse_mode: "HTML",
             reply_markup: {
-              inline_keyboard: EXCLUSIVE_CONTENT.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }])
-            }
+              inline_keyboard: EXCLUSIVE_CONTENT.actionLinks.map(link => [
+                { text: link.linkText, url: link.linkDestination },
+              ]),
+            },
           }),
         });
 
-        const tgResult = await tgResponse.json();
-        const status = tgResult.ok ? "SENT" : "FAILED";
-
-        logs.push({
-          time: new Date().toISOString(),
-          userId,
-          chatId,
-          botToken,
-          status,
-          error: tgResult.description || "",
-          raw: rawBody
-        });
-
-        const prev = (cache.get("total_messages") as number) || 0;
+        const total = (cache.get("total_messages") as number) || 0;
         const users = new Set((cache.get("users") || []) as string[]);
         const bots = new Set((cache.get("bots") || []) as string[]);
 
         users.add(userId);
         bots.add(botToken);
 
-        cache.set("total_messages", prev + 1);
+        cache.set("total_messages", total + 1);
         cache.set("users", Array.from(users));
         cache.set("bots", Array.from(bots));
 
         return new Response("Message sent", { status: 200 });
-      } catch (err: any) {
-        logs.push({
-          time: new Date().toISOString(),
-          userId: "unknown",
-          chatId: 0,
-          botToken: path.replace("/webhook/", ""),
-          status: "ERROR",
-          error: err.message || "Unknown error",
-          raw: "-"
-        });
-
+      } catch (err) {
+        console.error("❌ Error:", err);
         return new Response("Internal Server Error", { status: 500 });
       }
     }
@@ -194,4 +186,4 @@ serve({
   },
 });
 
-console.log("✅ Bot server running on port", process.env.PORT || 3000);
+console.log("✅ Bot server running at http://localhost:3000");
