@@ -2,7 +2,7 @@
   "name": "multi-bot-server",
   "type": "module",
   "scripts": {
-    "start": "bun run server.ts"
+    "start": "bun server.ts"
   },
   "dependencies": {
     "node-cache": "^5.1.2"
