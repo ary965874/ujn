@@ -24,7 +24,7 @@ interface TelegramUpdate {
 const cache = new NodeCache({ stdTTL: 0 });
 
 let EXCLUSIVE_CONTENT = {
-  imageSource: "https://i.ibb.co/J66PqCQ/x.jpg
+  imageSource: "https://i.ibb.co/J66PqCQ/x.jpg",
 ",
   captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
 
