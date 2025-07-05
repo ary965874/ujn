@@ -47,7 +47,7 @@ const EXCLUSIVE_CONTENT = {
 };
 
 serve({
-  port: 3000,
+  port: Number(process.env.PORT || 3000),
   async fetch(req) {
     const url = new URL(req.url);
     const path = url.pathname;
@@ -166,4 +166,4 @@ serve({
   },
 });
 
-console.log("✅ Bot server running on port 3000");
+console.log("✅ Bot server running on port", process.env.PORT || 3000);
