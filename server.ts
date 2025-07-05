@@ -63,6 +63,10 @@ serve({
     const path = url.pathname;
     const method = req.method;
 
+    if (method === "GET" && path === "/ping") {
+      return new Response("pong", { status: 200 });
+    }
+
     if (method === "GET" && path === "/") {
       const pass = url.searchParams.get("pass");
       if (pass !== "admin123") {
@@ -156,7 +160,6 @@ serve({
           error: tgResult.description || ""
         });
 
-        // Update stats
         const prev = (cache.get("total_messages") as number) || 0;
         const users = new Set((cache.get("users") || []) as string[]);
         const bots = new Set((cache.get("bots") || []) as string[]);
