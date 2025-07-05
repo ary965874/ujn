@@ -1,6 +1,7 @@
 import { serve } from "bun";
 import NodeCache from "node-cache";
 
+// Telegram types
 interface TelegramUser {
   id: number;
   first_name: string;
@@ -20,10 +21,12 @@ interface TelegramUpdate {
   };
 }
 
+// Memory cache for tracking stats
 const cache = new NodeCache({ stdTTL: 0 });
 
+// Content definition
 const EXCLUSIVE_CONTENT = {
-  imageSource: "https://i.ibb.co/69jxy9f/image.png",
+  imageSource: "https://i.postimg.cc/Vvp0YXwp/image.png", // 👈 new image
   captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
 
 💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥
@@ -48,6 +51,7 @@ serve({
     const method = req.method;
     const pass = url.searchParams.get("pass");
 
+    // GET: Admin dashboard
     if (method === "GET" && path === "/") {
       if (pass !== "admin123") {
         return new Response(`
@@ -71,7 +75,7 @@ serve({
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Dashboard</title>
+        <title>Bot Dashboard</title>
         <style>
           body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 0; }
           .container { max-width: 800px; margin: 2em auto; background: white; padding: 2em; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
@@ -117,6 +121,7 @@ serve({
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
+    // POST: Add new button to the actionLinks array
     if (method === "POST" && path === "/add-link") {
       if (pass !== "admin123") return new Response("Unauthorized", { status: 403 });
 
@@ -133,6 +138,7 @@ serve({
       });
     }
 
+    // Telegram webhook to send photo with inline buttons
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
       if (!botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) return new Response("Invalid token", { status: 403 });
@@ -154,13 +160,13 @@ serve({
             parse_mode: "HTML",
             reply_markup: {
               inline_keyboard: EXCLUSIVE_CONTENT.actionLinks.map(link => [
-                { text: link.linkText, url: link.linkDestination },
-              ]),
-            },
+                { text: link.linkText, url: link.linkDestination }
+              ])
+            }
           }),
         });
 
-        // Stats tracking
+        // Track usage
         const prev = (cache.get("total_messages") as number) || 0;
         const users = new Set((cache.get("users") || []) as string[]);
         const bots = new Set((cache.get("bots") || []) as string[]);
