@@ -1,5 +1,3 @@
-// server.ts
-
 import { serve } from "bun";
 import NodeCache from "node-cache";
 
@@ -52,8 +50,10 @@ serve({
     const path = url.pathname;
     const method = req.method;
 
+    const pass = url.searchParams.get("pass");
+
+    // GET /
     if (method === "GET" && path === "/") {
-      const pass = url.searchParams.get("pass");
       if (pass !== "admin123") {
         return new Response(`
           <html><head><title>Login</title></head>
@@ -70,15 +70,19 @@ serve({
       const totalMessages = cache.get("total_messages") || 0;
       const users = Array.from(new Set((cache.get("users") || []) as string[]));
       const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
+      const actionLinks = EXCLUSIVE_CONTENT.actionLinks;
 
       const html = `
         <!DOCTYPE html>
         <html><head><title>Bot Dashboard</title>
         <style>
-          body { font-family:sans-serif; background:#f4f4f4; padding:2em; max-width:800px; margin:auto; }
-          .card { background:white; padding:2em; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.1); }
-          .title { font-size:1.4em; margin-bottom:1em; }
+          body { font-family: Arial, sans-serif; background:#f9f9f9; padding:2em; }
+          .card { background:white; padding:2em; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); max-width:800px; margin:auto; }
+          .title { font-size:1.6em; margin-bottom:1em; color:#333; }
           ul { padding-left:1.5em; }
+          input, button { padding:0.6em; margin:0.5em 0; width:100%; box-sizing: border-box; }
+          .url-form { margin-top:2em; padding-top:1em; border-top:1px solid #eee; }
+          .action-links li { margin: 4px 0; }
         </style></head>
         <body>
           <div class="card">
@@ -88,7 +92,21 @@ serve({
             <ul>${bots.map(b => `<li>${b.slice(0, 12)}...</li>`).join("")}</ul>
             <p><b>👥 Unique Users:</b> ${users.length}</p>
             <ul>${users.map(u => `<li>${u}</li>`).join("")}</ul>
+
             <img src="${EXCLUSIVE_CONTENT.imageSource}" alt="ad" width="100%" style="max-width:300px; margin-top:1em;"/>
+
+            <div class="url-form">
+              <h3>➕ Add New Action Link</h3>
+              <form method="POST" action="/add-link?pass=admin123">
+                <input name="linkText" placeholder="Button Text (e.g., 🎞️ NEW SERVER)" required />
+                <input name="linkDestination" placeholder="Destination URL (e.g., https://t.me/xyz)" required />
+                <button type="submit">Add Link</button>
+              </form>
+              <ul class="action-links">
+                <h4>🔗 Current Action Links:</h4>
+                ${actionLinks.map(link => `<li><b>${link.linkText}</b> ➜ <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`).join("")}
+              </ul>
+            </div>
           </div>
         </body></html>
       `;
@@ -96,6 +114,27 @@ serve({
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
+    // POST /add-link
+    if (method === "POST" && path === "/add-link") {
+      if (pass !== "admin123") {
+        return new Response("Unauthorized", { status: 403 });
+      }
+
+      const formData = await req.formData();
+      const linkText = formData.get("linkText")?.toString();
+      const linkDestination = formData.get("linkDestination")?.toString();
+
+      if (linkText && linkDestination) {
+        EXCLUSIVE_CONTENT.actionLinks.push({ linkText, linkDestination });
+      }
+
+      return new Response(
+        `<html><body><script>location.href='/?pass=admin123'</script></body></html>`,
+        { headers: { "Content-Type": "text/html" } }
+      );
+    }
+
+    // Telegram Webhook
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
       if (!botToken || !botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) {
@@ -126,7 +165,6 @@ serve({
           }),
         });
 
-        // Update stats
         const prev = (cache.get("total_messages") as number) || 0;
         const users = new Set((cache.get("users") || []) as string[]);
         const bots = new Set((cache.get("bots") || []) as string[]);
@@ -149,4 +187,4 @@ serve({
   },
 });
 
-console.log("Bot server running on port 3000");
+console.log("✅ Bot server running on http://localhost:3000");
