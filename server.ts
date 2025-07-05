@@ -26,7 +26,7 @@ const EXCLUSIVE_CONTENT = {
   contentId: "premium_exclusive_content_2024",
   isEnabled: true,
   contentFormat: "image_with_caption_and_links",
-  imageSource: "https://i.postimg.cc/Vvp0YXwp/image.png",
+  imageSource: "https://iili.io/FlFKvHv.png",
   captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
 
 💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥
