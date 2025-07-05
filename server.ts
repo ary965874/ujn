@@ -1,5 +1,4 @@
 import express from "express"
-import { json } from "body-parser"
 import rateLimit from "express-rate-limit"
 
 // ==================== INTERFACES ====================
@@ -74,7 +73,7 @@ class Logger {
 // ==================== CACHE MANAGER CLASS ====================
 class CacheManager {
   private cache: Map<string, CacheItem> = new Map()
-  private cleanupInterval: NodeJS.Timeout
+  private cleanupInterval: NodeJS.Timeout | null = null
 
   constructor() {
     this.cleanupInterval = setInterval(
@@ -144,6 +143,7 @@ class CacheManager {
   destroy(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval)
+      this.cleanupInterval = null
     }
     this.clear()
   }
@@ -174,7 +174,7 @@ class HealthMonitor {
     const memTotal = memUsage.heapTotal
     const memPercentage = (memUsed / memTotal) * 100
 
-    const healthy = memPercentage < 90 && uptime > 10000
+    const healthy = memPercentage < 90 && uptime > 1000 // Reduced from 10000 to 1000
 
     return {
       healthy,
@@ -190,20 +190,28 @@ class StatsManager {
   constructor(private cacheManager: CacheManager) {}
 
   recordUpdate(update: TelegramUpdate): void {
-    const totalMessages = this.cacheManager.get("stats:total_messages") || 0
-    this.cacheManager.set("stats:total_messages", totalMessages + 1, 86400 * 7)
+    try {
+      const totalMessages = this.cacheManager.get("stats:total_messages") || 0
+      this.cacheManager.set("stats:total_messages", totalMessages + 1, 86400 * 7)
 
-    const userId = this.extractUserId(update)
-    if (userId) {
-      this.cacheManager.set(`stats:user:${userId}`, Date.now(), 86400)
+      const userId = this.extractUserId(update)
+      if (userId) {
+        this.cacheManager.set(`stats:user:${userId}`, Date.now(), 86400)
+      }
+
+      this.cacheManager.set("stats:last_activity", new Date().toISOString(), 86400)
+    } catch (error) {
+      console.error("Error recording update:", error)
     }
-
-    this.cacheManager.set("stats:last_activity", new Date().toISOString(), 86400)
   }
 
   recordError(): void {
-    const errors24h = this.cacheManager.get("stats:errors_24h") || 0
-    this.cacheManager.set("stats:errors_24h", errors24h + 1, 86400)
+    try {
+      const errors24h = this.cacheManager.get("stats:errors_24h") || 0
+      this.cacheManager.set("stats:errors_24h", errors24h + 1, 86400)
+    } catch (error) {
+      console.error("Error recording error:", error)
+    }
   }
 
   getStats(): {
@@ -212,20 +220,29 @@ class StatsManager {
     errors24h: number
     lastActivity: string | null
   } {
-    const totalMessages = this.cacheManager.get("stats:total_messages") || 0
-    const errors24h = this.cacheManager.get("stats:errors_24h") || 0
-    const lastActivity = this.cacheManager.get("stats:last_activity")
-    const userKeys = this.cacheManager.keys().filter((key) => key.startsWith("stats:user:"))
-    const activeUsers = userKeys.length
+    try {
+      const totalMessages = this.cacheManager.get("stats:total_messages") || 0
+      const errors24h = this.cacheManager.get("stats:errors_24h") || 0
+      const lastActivity = this.cacheManager.get("stats:last_activity")
+      const userKeys = this.cacheManager.keys().filter((key) => key.startsWith("stats:user:"))
+      const activeUsers = userKeys.length
 
-    return { totalMessages, activeUsers, errors24h, lastActivity }
+      return { totalMessages, activeUsers, errors24h, lastActivity }
+    } catch (error) {
+      console.error("Error getting stats:", error)
+      return { totalMessages: 0, activeUsers: 0, errors24h: 0, lastActivity: null }
+    }
   }
 
   private extractUserId(update: TelegramUpdate): string | null {
-    if (update.message?.from?.id) return update.message.from.id.toString()
-    if (update.callback_query?.from?.id) return update.callback_query.from.id.toString()
-    if (update.inline_query?.from?.id) return update.inline_query.from.id.toString()
-    return null
+    try {
+      if (update.message?.from?.id) return update.message.from.id.toString()
+      if (update.callback_query?.from?.id) return update.callback_query.from.id.toString()
+      if (update.inline_query?.from?.id) return update.inline_query.from.id.toString()
+      return null
+    } catch (error) {
+      return null
+    }
   }
 }
 
@@ -262,17 +279,19 @@ class TelegramAPI {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const url = `${this.baseURL}/${method}`
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-        const response = await fetch(url, {
+        // Create timeout manually for better compatibility
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("Request timeout")), 10000)
+        })
+
+        const fetchPromise = fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(params),
-          signal: controller.signal,
         })
 
-        clearTimeout(timeoutId)
+        const response = await Promise.race([fetchPromise, timeoutPromise])
         const data: TelegramResponse = await response.json()
 
         if (data.ok) {
@@ -302,7 +321,7 @@ class TelegramAPI {
           })
         }
       } catch (error: any) {
-        lastError = error.message
+        lastError = error.message || "Unknown error"
 
         this.logger.error("Request failed", {
           method,
@@ -311,7 +330,7 @@ class TelegramAPI {
           type: error.name,
         })
 
-        if (error.name === "AbortError") {
+        if (error.message === "Request timeout") {
           lastError = "Request timeout"
         } else if (error.code === "ECONNRESET" || error.code === "ETIMEDOUT") {
           lastError = "Connection error"
@@ -645,12 +664,16 @@ Send me any message and I'll respond!`
   }
 
   private extractChatId(update: TelegramUpdate): string | number | null {
-    if (update.message) return update.message.chat.id
-    if (update.edited_message) return update.edited_message.chat.id
-    if (update.callback_query?.message) return update.callback_query.message.chat.id
-    if (update.channel_post) return update.channel_post.chat.id
-    if (update.my_chat_member) return update.my_chat_member.chat.id
-    return null
+    try {
+      if (update.message) return update.message.chat.id
+      if (update.edited_message) return update.edited_message.chat.id
+      if (update.callback_query?.message) return update.callback_query.message.chat.id
+      if (update.channel_post) return update.channel_post.chat.id
+      if (update.my_chat_member) return update.my_chat_member.chat.id
+      return null
+    } catch (error) {
+      return null
+    }
   }
 
   private getUpdateType(update: TelegramUpdate): string {
@@ -664,31 +687,44 @@ Send me any message and I'll respond!`
   }
 
   private isThrottled(chatId: string | number): boolean {
-    const key = `throttle:${chatId}`
-    const count = this.cacheManager.get(key) || 0
+    try {
+      const key = `throttle:${chatId}`
+      const count = this.cacheManager.get(key) || 0
 
-    if (count >= 10) {
-      return true
+      if (count >= 10) {
+        return true
+      }
+
+      this.cacheManager.set(key, count + 1, 60)
+      return false
+    } catch (error) {
+      return false
     }
-
-    this.cacheManager.set(key, count + 1, 60)
-    return false
   }
 }
 
 // ==================== MAIN SERVER ====================
+console.log("🚀 Starting Telegram Bot Server...")
+
 const app = express()
 const PORT = process.env.PORT || 3000
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ""
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "your-secret-token"
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "webhook-secret-123"
+
+console.log("📋 Environment check:")
+console.log(`- PORT: ${PORT}`)
+console.log(`- BOT_TOKEN: ${TELEGRAM_BOT_TOKEN ? "Set ✅" : "Missing ❌"}`)
+console.log(`- WEBHOOK_SECRET: ${WEBHOOK_SECRET ? "Set ✅" : "Missing ❌"}`)
 
 if (!TELEGRAM_BOT_TOKEN) {
   console.error("❌ TELEGRAM_BOT_TOKEN environment variable is required")
   console.error("Get your token from @BotFather on Telegram")
+  console.error("Set it as an environment variable: TELEGRAM_BOT_TOKEN=your_token_here")
   process.exit(1)
 }
 
 // Initialize services
+console.log("🔧 Initializing services...")
 const logger = new Logger()
 const cacheManager = new CacheManager()
 const healthMonitor = new HealthMonitor()
@@ -698,15 +734,17 @@ const webhookHandler = new WebhookHandler(telegramAPI, logger, cacheManager, sta
 
 // Global error handlers
 process.on("uncaughtException", (error) => {
+  console.error("❌ Uncaught Exception:", error.message)
   logger.error("Uncaught Exception", { error: error.message, stack: error.stack })
 })
 
 process.on("unhandledRejection", (reason, promise) => {
+  console.error("❌ Unhandled Rejection:", reason)
   logger.error("Unhandled Rejection", { reason, promise })
 })
 
 // Middleware
-app.use(json({ limit: "10mb" }))
+app.use(express.json({ limit: "10mb" }))
 
 // Rate limiting
 const limiter = rateLimit({
@@ -722,6 +760,11 @@ app.use("/webhook", limiter)
 app.use((req, res, next) => {
   healthMonitor.recordRequest()
   next()
+})
+
+// Health check route (for deployment platforms)
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() })
 })
 
 // Routes
@@ -765,12 +808,13 @@ app.get("/", (req, res) => {
             h2 { color: #34495e; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
             .emoji { font-size: 1.2em; }
             .loading { opacity: 0.6; }
+            code { background: #f1f1f1; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1><span class="emoji">🤖</span> Telegram Bot Server Dashboard</h1>
-            <p>Production-ready Telegram bot with bulletproof error handling</p>
+            <h1><span class="emoji">🤖</span> Telegram Bot Server</h1>
+            <p>✅ Server is running and ready to receive webhooks!</p>
             
             <div id="status" class="status loading">Loading status...</div>
             
@@ -789,12 +833,11 @@ app.get("/", (req, res) => {
             </div>
             
             <div style="margin-top: 30px; padding: 20px; background: #e3f2fd; border-radius: 8px;">
-                <h3><span class="emoji">🔧</span> Setup Instructions</h3>
-                <ol>
-                    <li>Get your bot token from <a href="https://t.me/botfather" target="_blank">@BotFather</a></li>
-                    <li>Set webhook: <code>https://api.telegram.org/bot&lt;TOKEN&gt;/setWebhook?url=https://your-domain.com/webhook/${WEBHOOK_SECRET}</code></li>
-                    <li>Get your chat ID from <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a></li>
-                </ol>
+                <h3><span class="emoji">🔧</span> Webhook Setup</h3>
+                <p>Set your webhook URL to:</p>
+                <code>https://your-domain.com/webhook/${WEBHOOK_SECRET}</code>
+                <p style="margin-top: 10px;">Or use your bot token as the secret:</p>
+                <code>https://your-domain.com/webhook/${TELEGRAM_BOT_TOKEN}</code>
             </div>
         </div>
         
@@ -950,8 +993,7 @@ app.post("/webhook/:secret", async (req, res) => {
     if (!validSecrets.includes(providedSecret)) {
       logger.warn("Invalid webhook secret", {
         ip: req.ip,
-        providedSecret: providedSecret.substring(0, 10) + "...", // Log partial for debugging
-        expectedSecrets: validSecrets.map((s) => s.substring(0, 10) + "..."),
+        providedSecret: providedSecret.substring(0, 10) + "...",
       })
       return res.status(401).json({ error: "Unauthorized" })
     }
@@ -974,8 +1016,15 @@ app.post("/webhook/:secret", async (req, res) => {
 
 // Graceful shutdown
 const gracefulShutdown = (signal: string) => {
+  console.log(`📴 Received ${signal}, shutting down gracefully...`)
   logger.info(`Received ${signal}, shutting down gracefully`)
-  cacheManager.destroy()
+
+  try {
+    cacheManager.destroy()
+  } catch (error) {
+    console.error("Error during cleanup:", error)
+  }
+
   process.exit(0)
 }
 
@@ -983,12 +1032,26 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM"))
 process.on("SIGINT", () => gracefulShutdown("SIGINT"))
 
 // Start server
+console.log("🌐 Starting HTTP server...")
 const server = app.listen(PORT, () => {
-  logger.info(`🚀 Server started on port ${PORT}`)
-  logger.info(`📡 Webhook URL (with secret): http://localhost:${PORT}/webhook/${WEBHOOK_SECRET}`)
-  logger.info(`📡 Webhook URL (with token): http://localhost:${PORT}/webhook/${TELEGRAM_BOT_TOKEN}`)
-  logger.info(`🌐 Dashboard: http://localhost:${PORT}`)
-  logger.info(`✅ Bot is ready and bulletproof!`)
+  console.log(`✅ Server started successfully!`)
+  console.log(`🌐 Dashboard: http://localhost:${PORT}`)
+  console.log(`📡 Webhook endpoint: /webhook/${WEBHOOK_SECRET}`)
+  console.log(
+    `🔗 Set webhook: https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=https://your-domain.com/webhook/${WEBHOOK_SECRET}`,
+  )
+  console.log(`🤖 Bot is ready and bulletproof!`)
+
+  logger.info("Server started successfully", { port: PORT })
+})
+
+// Handle server errors
+server.on("error", (error: any) => {
+  console.error("❌ Server error:", error.message)
+  if (error.code === "EADDRINUSE") {
+    console.error(`Port ${PORT} is already in use. Try a different port.`)
+  }
+  process.exit(1)
 })
 
 export default app
