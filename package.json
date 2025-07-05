@@ -1,29 +1,10 @@
 {
-  "name": "telegram-bot-single-file",
-  "version": "1.0.0",
-  "description": "Single-file bulletproof Telegram bot server",
-  "main": "server.ts",
+  "name": "multi-bot-server",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch server.ts",
-    "start": "tsx server.ts",
-    "build": "tsc server.ts --outDir dist --target ES2020 --module ESNext --moduleResolution node",
-    "bun:dev": "bun --watch server.ts",
-    "bun:start": "bun server.ts"
+    "start": "bun server.ts"
   },
   "dependencies": {
-    "express": "^4.21.2",
-    "express-rate-limit": "^7.5.1",
     "node-cache": "^5.1.2"
-  },
-  "devDependencies": {
-    "@types/express": "^4.17.23",
-    "@types/node": "^20.19.4",
-    "@types/node-cache": "5.1.2",
-    "tsx": "^4.20.3",
-    "typescript": "^5.8.3"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }
