@@ -1,11 +1,9 @@
-FROM oven/bun:1
+FROM oven/bun
 
 WORKDIR /app
-
 COPY . .
 
-ARG PORT
+RUN bun install
 
-EXPOSE ${PORT:-3000}
-
-CMD bun install && bun run server
+EXPOSE 3000
+CMD ["bun", "server.ts"]
