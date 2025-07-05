@@ -19,6 +19,7 @@ interface TelegramUpdate {
   message?: {
     chat: TelegramChat;
     from?: TelegramUser;
+    text?: string;
   };
 }
 
@@ -96,18 +97,24 @@ serve({
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
+    if (method === "GET" && path === "/ping") {
+      return new Response("pong", { status: 200 });
+    }
+
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
       if (!botToken || !botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) {
+        console.error("❌ Invalid bot token format", botToken);
         return new Response("Invalid bot token format", { status: 403 });
       }
 
       try {
-        const update: TelegramUpdate = await req.json();
-        console.log("✅ Incoming update:", JSON.stringify(update, null, 2));
+        const rawBody = await req.text();
+        console.log("📩 Raw Telegram Webhook:", rawBody);
+        const update: TelegramUpdate = JSON.parse(rawBody);
 
         if (!update.message || !update.message.chat?.id || !update.message.from?.id) {
-          console.warn("⚠️ Skipping update: Missing message/chat info.");
+          console.warn("⚠️ Missing message/chat info.");
           return new Response("Invalid Telegram update", { status: 200 });
         }
 
@@ -130,10 +137,10 @@ serve({
         });
 
         const tgResult = await tgResponse.json();
-        console.log("📦 Telegram response:", JSON.stringify(tgResult, null, 2));
+        console.log("📦 Telegram API response:", JSON.stringify(tgResult, null, 2));
 
         if (!tgResult.ok) {
-          console.error("❌ Telegram error:", tgResult.description);
+          console.error("❌ Telegram API error:", tgResult.description);
         }
 
         // Update stats
@@ -150,7 +157,7 @@ serve({
 
         return new Response("Message sent", { status: 200 });
       } catch (err) {
-        console.error("❌ Caught exception:", err);
+        console.error("❌ Exception in webhook handler:", err);
         return new Response("Internal Server Error", { status: 500 });
       }
     }
