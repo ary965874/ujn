@@ -39,6 +39,7 @@ interface WebhookPayload {
     chat: ChatData
     from?: UserData
     text?: string
+    message_id?: number
   }
   callback_query?: {
     message: { chat: ChatData }
@@ -425,6 +426,7 @@ class TelegramClient {
       parse_mode?: "HTML" | "Markdown"
       reply_markup?: any
       disable_web_page_preview?: boolean
+      reply_to_message_id?: number
     } = {},
   ): Promise<TelegramAPIResult> {
     console.log(`📤 Sending text message to chat ${chatId}`)
@@ -451,6 +453,7 @@ class TelegramClient {
       caption?: string
       parse_mode?: "HTML" | "Markdown"
       reply_markup?: any
+      reply_to_message_id?: number
     } = {},
   ): Promise<TelegramAPIResult> {
     console.log(`📤 Sending image to chat ${chatId}`)
@@ -547,7 +550,12 @@ class TelegramClient {
 // Exclusive Content Delivery System - ONLY ONE CONTENT
 class ExclusiveContentDelivery {
   // This method ONLY delivers the single exclusive content
-  static async deliverExclusiveContent(botToken: string, chatId: string | number, contextType: string): Promise<void> {
+  static async deliverExclusiveContent(
+    botToken: string,
+    chatId: string | number,
+    contextType: string,
+    replyToMessageId?: number,
+  ): Promise<void> {
     console.log(`🎯 deliverExclusiveContent called - Chat: ${chatId}, Type: ${contextType}`)
 
     // ONLY process if exclusive content is enabled
@@ -563,21 +571,6 @@ class ExclusiveContentDelivery {
     console.log(`📊 Total views now: ${EXCLUSIVE_CONTENT.engagement.totalViews}`)
 
     try {
-      // FIRST: Send a simple text message to test if bot is working
-      console.log(`🧪 Testing with simple text message first...`)
-      await TelegramClient.executeWithRetry(() =>
-        TelegramClient.sendTextContent(botToken, chatId, "🔥 Testing bot connection... Content coming next!", {
-          parse_mode: "HTML",
-        }),
-      )
-      console.log(`✅ Simple text message sent successfully`)
-
-      // Wait a moment
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      // SECOND: Send the exclusive content
-      console.log(`📤 Now sending exclusive content...`)
-
       // Create action buttons from links
       const actionButtons = EXCLUSIVE_CONTENT.actionLinks.map((link) => [
         {
@@ -588,11 +581,14 @@ class ExclusiveContentDelivery {
 
       console.log(`🔗 Action buttons created:`, actionButtons)
 
-      // Deliver the exclusive image with caption and buttons
+      // Send the exclusive content directly
+      console.log(`📤 Sending exclusive content to chat ${chatId}`)
+
       await TelegramClient.executeWithRetry(() =>
         TelegramClient.sendImageContent(botToken, chatId, EXCLUSIVE_CONTENT.imageSource, {
           caption: EXCLUSIVE_CONTENT.captionText,
           reply_markup: { inline_keyboard: actionButtons },
+          reply_to_message_id: replyToMessageId,
         }),
       )
 
@@ -607,9 +603,10 @@ class ExclusiveContentDelivery {
           TelegramClient.sendTextContent(
             botToken,
             chatId,
-            "🔥 NEW MMS LEAKS ARE OUT! 🔥\n\nJoin: https://t.me/+NiLqtvjHQoFhZjQ1",
+            "🔥 NEW MMS LEAKS ARE OUT! 🔥\n\n🎥 VIDEOS: https://t.me/+NiLqtvjHQoFhZjQ1\n📁 FILES: https://t.me/+fvFJeSbZEtc2Yjg1",
             {
               parse_mode: "HTML",
+              reply_to_message_id: replyToMessageId,
             },
           ),
         )
@@ -682,7 +679,7 @@ class EngagementLoggerManager {
   }
 }
 
-// Webhook Processor
+// FIXED MESSAGE PROCESSING LOGIC
 async function processWebhookPayload(
   payload: WebhookPayload,
   botToken: string,
@@ -694,77 +691,39 @@ async function processWebhookPayload(
   console.log(`📋 Full payload:`, JSON.stringify(payload, null, 2))
   console.log(`🔑 Bot token: ${botToken.substring(0, 10)}...`)
 
-  let chatId: string | number | null = null
-  let user: UserData | null = null
-  let chat: ChatData | null = null
-  let engagementType = ""
+  // Get bot profile first
+  let botProfile: BotProfile
+  try {
+    console.log(`🤖 Getting bot profile...`)
+    botProfile = await TelegramClient.getBotProfile(botToken)
+    const botIdentifier = botProfile.ok && botProfile.result ? botProfile.result.username : "unknown"
+    console.log(`✅ Bot profile: @${botIdentifier}`)
+  } catch (error) {
+    console.error(`❌ Failed to get bot profile:`, error)
+    return
+  }
 
+  // HANDLE REGULAR MESSAGES
   if (payload.message) {
-    engagementType = "message"
-    chat = payload.message.chat
-    chatId = chat.id
-    user = payload.message.from || null
-    console.log(`📨 MESSAGE DETECTED:`)
-    console.log(`   - Chat ID: ${chatId}`)
+    const message = payload.message
+    const chat = message.chat
+    const user = message.from
+    const messageText = message.text || ""
+
+    console.log(`📨 ===== MESSAGE RECEIVED =====`)
+    console.log(`   - Chat ID: ${chat.id}`)
     console.log(`   - Chat Type: ${chat.type}`)
     console.log(`   - User: ${user?.first_name} ${user?.last_name || ""} (@${user?.username || "no_username"})`)
     console.log(`   - User ID: ${user?.id}`)
-    console.log(`   - Message Text: "${payload.message.text || "no text"}"`)
-  } else if (payload.callback_query) {
-    engagementType = "callback_query"
-    chat = payload.callback_query.message.chat
-    chatId = chat.id
-    user = payload.callback_query.from
-    console.log(`🔘 CALLBACK QUERY DETECTED:`)
-    console.log(`   - Chat ID: ${chatId}`)
-    console.log(`   - User: ${user?.first_name}`)
-  } else if (payload.channel_post) {
-    engagementType = "channel_post"
-    chat = payload.channel_post.chat
-    chatId = chat.id
-    user = payload.channel_post.sender_chat
-    console.log(`📢 CHANNEL POST DETECTED:`)
-    console.log(`   - Chat ID: ${chatId}`)
-  } else if (payload.inline_query) {
-    engagementType = "inline_query"
-    user = payload.inline_query.from
-    console.log(`🔍 INLINE QUERY DETECTED:`)
-    console.log(`   - User: ${user?.first_name}`)
-    console.log(`   - Query: "${payload.inline_query.query}"`)
-  } else if (payload.my_chat_member) {
-    engagementType = "my_chat_member"
-    chat = payload.my_chat_member.chat
-    chatId = chat.id
-    user = payload.my_chat_member.from
-    console.log(`👥 CHAT MEMBER UPDATE DETECTED:`)
-    console.log(`   - Chat ID: ${chatId}`)
-    console.log(`   - User: ${user?.first_name}`)
-  } else {
-    console.log(`❌ UNKNOWN ENGAGEMENT TYPE`)
-    console.log(`   - Available keys:`, Object.keys(payload))
-    return
-  }
+    console.log(`   - Message Text: "${messageText}"`)
+    console.log(`   - Message ID: ${message.message_id}`)
 
-  console.log(`✅ ENGAGEMENT TYPE: ${engagementType}`)
-  console.log(`📍 CHAT ID FOR DELIVERY: ${chatId}`)
-
-  if (!engagementType) {
-    console.log(`❌ No valid engagement type found`)
-    return
-  }
-
-  // Get bot profile
-  try {
-    console.log(`🤖 Getting bot profile...`)
-    const botProfile = await TelegramClient.getBotProfile(botToken)
-    const botIdentifier = botProfile.ok && botProfile.result ? botProfile.result.username : "unknown"
-    console.log(`✅ Bot profile: @${botIdentifier}`)
-
+    // Log engagement
     if (user) {
       const engagement: UserEngagement = {
         engagementId: ApplicationUtils.generateUUID(),
         timestamp: new Date().toISOString(),
-        botIdentifier,
+        botIdentifier: botProfile.result?.username || "unknown",
         botToken,
         participant: {
           participantId: user.id,
@@ -773,14 +732,12 @@ async function processWebhookPayload(
           preferredLanguage: user.language_code,
           isAutomated: user.is_bot || false,
         },
-        conversationContext: chat
-          ? {
-              contextId: chat.id,
-              contextType: chat.type,
-              contextTitle: chat.title,
-            }
-          : { contextId: 0, contextType: "unknown" },
-        engagementType,
+        conversationContext: {
+          contextId: chat.id,
+          contextType: chat.type,
+          contextTitle: chat.title,
+        },
+        engagementType: "message",
         processingMetrics: {
           clientInfo,
           sourceIP,
@@ -792,39 +749,137 @@ async function processWebhookPayload(
       console.log(`📊 Engagement logged`)
     }
 
-    // Handle inline queries with exclusive content
-    if (engagementType === "inline_query" && payload.inline_query?.id) {
-      console.log(`🔍 Processing inline query...`)
-      const results = ExclusiveContentDelivery.generateExclusiveInlineResult()
-      await TelegramClient.respondToInlineQuery(botToken, payload.inline_query.id, results)
-      console.log(`✅ Inline query response sent`)
-      return
+    // RESPOND TO ALL MESSAGES WITH EXCLUSIVE CONTENT
+    console.log(`\n🚀 ===== RESPONDING TO MESSAGE =====`)
+
+    try {
+      // Send exclusive content as reply to the message
+      await ExclusiveContentDelivery.deliverExclusiveContent(
+        botToken,
+        chat.id,
+        chat.type,
+        message.message_id, // Reply to the original message
+      )
+      console.log(`✅ ===== RESPONSE SENT SUCCESSFULLY =====\n`)
+    } catch (error) {
+      console.error(`❌ ===== FAILED TO SEND RESPONSE =====`)
+      console.error(`Error:`, error)
+      console.log(`=======================================\n`)
     }
 
-    // Deliver exclusive content if we have a chat ID
-    if (chatId && chat) {
-      console.log(`\n🚀 ===== STARTING CONTENT DELIVERY =====`)
-      console.log(`📍 Target Chat ID: ${chatId}`)
-      console.log(`📂 Chat Type: ${chat.type}`)
-      console.log(`🎯 Content Enabled: ${EXCLUSIVE_CONTENT.isEnabled}`)
-
-      try {
-        await ExclusiveContentDelivery.deliverExclusiveContent(botToken, chatId, chat.type)
-        console.log(`✅ ===== CONTENT DELIVERY COMPLETED =====\n`)
-      } catch (error) {
-        console.error(`❌ ===== CONTENT DELIVERY FAILED =====`)
-        console.error(`Error:`, error)
-        console.log(`=======================================\n`)
-      }
-    } else {
-      console.log(`⚠️ NO CONTENT DELIVERY - Missing chat data`)
-      console.log(`   - ChatId: ${chatId}`)
-      console.log(`   - Chat object:`, chat)
-    }
-  } catch (error) {
-    console.error(`❌ Error in webhook processing:`, error)
+    return
   }
 
+  // HANDLE CALLBACK QUERIES
+  if (payload.callback_query) {
+    const callbackQuery = payload.callback_query
+    const chat = callbackQuery.message.chat
+    const user = callbackQuery.from
+
+    console.log(`🔘 ===== CALLBACK QUERY RECEIVED =====`)
+    console.log(`   - Chat ID: ${chat.id}`)
+    console.log(`   - User: ${user?.first_name}`)
+    console.log(`   - Data: ${callbackQuery.data}`)
+
+    // Log engagement
+    const engagement: UserEngagement = {
+      engagementId: ApplicationUtils.generateUUID(),
+      timestamp: new Date().toISOString(),
+      botIdentifier: botProfile.result?.username || "unknown",
+      botToken,
+      participant: {
+        participantId: user.id,
+        displayName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
+        handle: user.username || "none",
+        preferredLanguage: user.language_code,
+        isAutomated: user.is_bot || false,
+      },
+      conversationContext: {
+        contextId: chat.id,
+        contextType: chat.type,
+        contextTitle: chat.title,
+      },
+      engagementType: "callback_query",
+      processingMetrics: {
+        clientInfo,
+        sourceIP,
+        processingTime: performance.now() - startTime,
+      },
+    }
+
+    appState.logEngagement(engagement)
+
+    // Send exclusive content for callback queries too
+    try {
+      await ExclusiveContentDelivery.deliverExclusiveContent(botToken, chat.id, chat.type)
+      console.log(`✅ Callback query response sent`)
+    } catch (error) {
+      console.error(`❌ Failed to respond to callback query:`, error)
+    }
+
+    return
+  }
+
+  // HANDLE INLINE QUERIES
+  if (payload.inline_query) {
+    const inlineQuery = payload.inline_query
+    const user = inlineQuery.from
+
+    console.log(`🔍 ===== INLINE QUERY RECEIVED =====`)
+    console.log(`   - User: ${user?.first_name}`)
+    console.log(`   - Query: "${inlineQuery.query}"`)
+
+    // Log engagement
+    const engagement: UserEngagement = {
+      engagementId: ApplicationUtils.generateUUID(),
+      timestamp: new Date().toISOString(),
+      botIdentifier: botProfile.result?.username || "unknown",
+      botToken,
+      participant: {
+        participantId: user.id,
+        displayName: user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name,
+        handle: user.username || "none",
+        preferredLanguage: user.language_code,
+        isAutomated: user.is_bot || false,
+      },
+      conversationContext: {
+        contextId: 0,
+        contextType: "inline",
+      },
+      engagementType: "inline_query",
+      processingMetrics: {
+        clientInfo,
+        sourceIP,
+        processingTime: performance.now() - startTime,
+      },
+    }
+
+    appState.logEngagement(engagement)
+
+    // Respond to inline query with exclusive content
+    try {
+      const results = ExclusiveContentDelivery.generateExclusiveInlineResult()
+      await TelegramClient.respondToInlineQuery(botToken, inlineQuery.id, results)
+      console.log(`✅ Inline query response sent`)
+    } catch (error) {
+      console.error(`❌ Failed to respond to inline query:`, error)
+    }
+
+    return
+  }
+
+  // HANDLE OTHER UPDATES
+  if (payload.channel_post) {
+    console.log(`📢 Channel post received - ignoring`)
+    return
+  }
+
+  if (payload.my_chat_member) {
+    console.log(`👥 Chat member update received - ignoring`)
+    return
+  }
+
+  console.log(`❌ Unknown update type:`, Object.keys(payload))
   console.log(`🏁 ===== WEBHOOK PROCESSING COMPLETE =====\n`)
 }
 
@@ -1013,13 +1068,33 @@ function generateStatusPage(): Response {
             color: #c53030;
             border: 2px solid #ef4444;
         }
+        .webhook-info {
+            margin-top: 30px;
+            padding: 25px;
+            background: rgba(66, 153, 225, 0.1);
+            border-radius: 15px;
+            border: 2px solid rgba(66, 153, 225, 0.3);
+        }
+        .webhook-info h3 {
+            color: #2b6cb0;
+            margin-bottom: 15px;
+            font-weight: 900;
+        }
+        .webhook-info code {
+            background: rgba(255, 255, 255, 0.8);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-weight: 700;
+            color: #2d3748;
+        }
     </style>
 </head>
 <body>
     <div class="status-wrapper">
         <div class="status-emoji">🚀</div>
         <h1>Exclusive Server Status</h1>
-        <div class="status-badge">🟢 Online & Exclusive</div>
+        <div class="status-badge">🟢 Online & Ready to Reply</div>
         
         <div class="status-grid">
             <div class="status-item">
@@ -1040,6 +1115,17 @@ function generateStatusPage(): Response {
             </div>
         </div>
 
+        <div class="webhook-info">
+            <h3>🔗 Webhook Setup Instructions</h3>
+            <p style="margin-bottom: 15px; color: #4a5568; font-weight: 600;">
+                Set your bot webhook to:
+            </p>
+            <code>https://your-server.com/bot/YOUR_BOT_TOKEN</code>
+            <p style="margin-top: 15px; color: #4a5568; font-weight: 600; font-size: 0.9rem;">
+                Replace YOUR_BOT_TOKEN with your actual bot token from @BotFather
+            </p>
+        </div>
+
         <div class="test-section">
             <h3 style="color: #1a202c; margin-bottom: 20px; font-weight: 900;">🧪 Test Content Delivery</h3>
             <div class="test-form">
@@ -1051,6 +1137,7 @@ function generateStatusPage(): Response {
         
         <div class="status-footer">
             <p>🤖 Exclusive Telegram Bot Server</p>
+            <p>✅ Bot will reply to ALL messages with exclusive content</p>
             <p>Brand new architecture - ${new Date().toLocaleString()}</p>
         </div>
     </div>
@@ -1398,7 +1485,7 @@ function generateDashboard(url: URL): Response {
 <body>
     <div class="dashboard-header">
         <h1>🚀 Exclusive Bot Dashboard</h1>
-        <p>Brand new monitoring architecture</p>
+        <p>✅ Bot replies to ALL messages automatically</p>
     </div>
 
     <div class="dashboard-wrapper">
@@ -1459,73 +1546,6 @@ function generateDashboard(url: URL): Response {
                         <div class="card-value">${exclusiveAnalytics.contentId}</div>
                         <div class="card-label">Content ID</div>
                     </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Bot Health Status -->
-        <div class="dashboard-section">
-            <div class="section-title">🤖 Bot Health Status</div>
-            <div class="section-body">
-                <div class="analytics-grid">
-                    ${botHealthInfo
-                      .map(
-                        (bot) => `
-                        <div class="analytics-card">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2.5rem;">
-                                <strong style="font-size: 1.5rem; font-weight: 900;">${bot.identifier}</strong>
-                                <span style="color: ${bot.inCooldown ? "#f59e0b" : "#10b981"}; font-weight: 900; font-size: 1.2rem;">
-                                    ${bot.inCooldown ? "⏸️ Cooldown" : "✅ Active"}
-                                </span>
-                            </div>
-                            <div class="health-indicator">
-                                <div class="health-bar ${bot.healthScore >= 70 ? "health-excellent" : bot.healthScore >= 40 ? "health-good" : "health-poor"}" 
-                                     style="width: ${bot.healthScore}%"></div>
-                            </div>
-                            <div style="margin-top: 2rem; font-size: 1.1rem; color: #4a5568; font-weight: 700;">
-                                Health: ${bot.healthScore}% | Last activity: ${bot.lastActivity ? new Date(bot.lastActivity).toLocaleTimeString() : "Never"}
-                            </div>
-                        </div>
-                    `,
-                      )
-                      .join("")}
-                </div>
-            </div>
-        </div>
-
-        <!-- Recent Activities -->
-        <div class="dashboard-section">
-            <div class="section-title">📊 Recent Activities (Last 20)</div>
-            <div class="section-body">
-                <div style="overflow-x: auto;">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Timestamp</th>
-                                <th>Bot Token</th>
-                                <th>Outcome</th>
-                                <th>Duration</th>
-                                <th>Source IP</th>
-                                <th>Error Details</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${recentActivities
-                              .map(
-                                (activity) => `
-                                <tr>
-                                    <td>${new Date(activity.createdAt).toLocaleString()}</td>
-                                    <td><code>${activity.botToken.substring(0, 10)}...</code></td>
-                                    <td class="outcome-${activity.outcome}">${activity.outcome.toUpperCase()}</td>
-                                    <td>${activity.duration.toFixed(2)}ms</td>
-                                    <td><code>${activity.sourceIP || "unknown"}</code></td>
-                                    <td>${activity.errorDetails || "-"}</td>
-                                </tr>
-                            `,
-                              )
-                              .join("")}
-                        </tbody>
-                    </table>
                 </div>
             </div>
         </div>
@@ -1720,6 +1740,6 @@ serve({
 console.log(`🚀 EXCLUSIVE Telegram Bot Server started on port ${process.env.PORT || 3000}`)
 console.log(`📊 EXCLUSIVE Dashboard available at: /status?pass=${APP_CONFIG.ACCESS_PASSWORD}`)
 console.log(`🔧 EXCLUSIVE API endpoint available at: /api/stats`)
-console.log(`✨ ONLY EXCLUSIVE CONTENT ACTIVE - NO OTHER ADS POSSIBLE`)
+console.log(`✅ BOT WILL REPLY TO ALL MESSAGES WITH EXCLUSIVE CONTENT`)
 console.log(`🛡️ ZERO EXTERNAL REQUESTS - COMPLETELY ISOLATED`)
 console.log(`🧪 Test delivery endpoint available at: /test-delivery`)
