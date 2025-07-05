@@ -23,9 +23,6 @@ interface TelegramUpdate {
 const cache = new NodeCache({ stdTTL: 0 });
 
 const EXCLUSIVE_CONTENT = {
-  contentId: "premium_exclusive_content_2024",
-  isEnabled: true,
-  contentFormat: "image_with_caption_and_links",
   imageSource: "https://i.ibb.co/69jxy9f/image.png",
   captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
 
@@ -49,10 +46,8 @@ serve({
     const url = new URL(req.url);
     const path = url.pathname;
     const method = req.method;
-
     const pass = url.searchParams.get("pass");
 
-    // GET /
     if (method === "GET" && path === "/") {
       if (pass !== "admin123") {
         return new Response(`
@@ -70,88 +65,86 @@ serve({
       const totalMessages = cache.get("total_messages") || 0;
       const users = Array.from(new Set((cache.get("users") || []) as string[]));
       const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
-      const actionLinks = EXCLUSIVE_CONTENT.actionLinks;
+      const links = EXCLUSIVE_CONTENT.actionLinks;
 
       const html = `
-        <!DOCTYPE html>
-        <html><head><title>Bot Dashboard</title>
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Dashboard</title>
         <style>
-          body { font-family: Arial, sans-serif; background:#f9f9f9; padding:2em; }
-          .card { background:white; padding:2em; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); max-width:800px; margin:auto; }
-          .title { font-size:1.6em; margin-bottom:1em; color:#333; }
-          ul { padding-left:1.5em; }
-          input, button { padding:0.6em; margin:0.5em 0; width:100%; box-sizing: border-box; }
-          .url-form { margin-top:2em; padding-top:1em; border-top:1px solid #eee; }
-          .action-links li { margin: 4px 0; }
-        </style></head>
-        <body>
-          <div class="card">
-            <h1 class="title">📊 Bot Dashboard</h1>
+          body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 0; }
+          .container { max-width: 800px; margin: 2em auto; background: white; padding: 2em; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+          h1 { margin-top: 0; }
+          .stats p { margin: 5px 0; }
+          .button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; margin-top: 1em; }
+          .button:hover { background: #0056b3; }
+          #addLinkForm { display: none; margin-top: 1em; }
+          input { padding: 10px; width: 100%; margin-top: 0.5em; box-sizing: border-box; }
+          .link-list li { margin: 4px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>📊 Bot Dashboard</h1>
+          <div class="stats">
             <p><b>✅ Total Messages Sent:</b> ${totalMessages}</p>
             <p><b>🤖 Bots Connected:</b> ${bots.length}</p>
             <ul>${bots.map(b => `<li>${b.slice(0, 12)}...</li>`).join("")}</ul>
             <p><b>👥 Unique Users:</b> ${users.length}</p>
             <ul>${users.map(u => `<li>${u}</li>`).join("")}</ul>
-
-            <img src="${EXCLUSIVE_CONTENT.imageSource}" alt="ad" width="100%" style="max-width:300px; margin-top:1em;"/>
-
-            <div class="url-form">
-              <h3>➕ Add New Action Link</h3>
-              <form method="POST" action="/add-link?pass=admin123">
-                <input name="linkText" placeholder="Button Text (e.g., 🎞️ NEW SERVER)" required />
-                <input name="linkDestination" placeholder="Destination URL (e.g., https://t.me/xyz)" required />
-                <button type="submit">Add Link</button>
-              </form>
-              <ul class="action-links">
-                <h4>🔗 Current Action Links:</h4>
-                ${actionLinks.map(link => `<li><b>${link.linkText}</b> ➜ <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`).join("")}
-              </ul>
-            </div>
           </div>
-        </body></html>
+
+          <img src="${EXCLUSIVE_CONTENT.imageSource}" width="100%" style="max-width:300px;margin:1em 0;" />
+
+          <h3>🔗 Current Action Links:</h3>
+          <ul class="link-list">
+            ${links.map(l => `<li><b>${l.linkText}</b>: <a href="${l.linkDestination}" target="_blank">${l.linkDestination}</a></li>`).join("")}
+          </ul>
+
+          <button class="button" onclick="document.getElementById('addLinkForm').style.display='block'">➕ Add New Link</button>
+
+          <form id="addLinkForm" method="POST" action="/add-link?pass=admin123">
+            <input type="text" name="linkText" placeholder="Link Button Text" required />
+            <input type="url" name="linkDestination" placeholder="Destination URL" required />
+            <button type="submit" class="button">Add Link</button>
+          </form>
+        </div>
+      </body>
+      </html>
       `;
 
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
-    // POST /add-link
     if (method === "POST" && path === "/add-link") {
-      if (pass !== "admin123") {
-        return new Response("Unauthorized", { status: 403 });
-      }
+      if (pass !== "admin123") return new Response("Unauthorized", { status: 403 });
 
-      const formData = await req.formData();
-      const linkText = formData.get("linkText")?.toString();
-      const linkDestination = formData.get("linkDestination")?.toString();
+      const form = await req.formData();
+      const linkText = form.get("linkText")?.toString();
+      const linkDestination = form.get("linkDestination")?.toString();
 
       if (linkText && linkDestination) {
         EXCLUSIVE_CONTENT.actionLinks.push({ linkText, linkDestination });
       }
 
-      return new Response(
-        `<html><body><script>location.href='/?pass=admin123'</script></body></html>`,
-        { headers: { "Content-Type": "text/html" } }
-      );
+      return new Response(`<html><body><script>location.href='/?pass=admin123'</script></body></html>`, {
+        headers: { "Content-Type": "text/html" },
+      });
     }
 
-    // Telegram Webhook
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
-      if (!botToken || !botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) {
-        return new Response("Invalid bot token format", { status: 403 });
-      }
+      if (!botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) return new Response("Invalid token", { status: 403 });
 
       try {
         const update: TelegramUpdate = await req.json();
-        if (!update.message || !update.message.chat?.id || !update.message.from?.id) {
-          return new Response("Invalid Telegram update", { status: 200 });
-        }
+        const chatId = update.message?.chat?.id;
+        const userId = update.message?.from?.id?.toString();
 
-        const chatId = update.message.chat.id;
-        const userId = update.message.from.id.toString();
+        if (!chatId || !userId) return new Response("Invalid update", { status: 200 });
 
-        const telegramApi = `https://api.telegram.org/bot${botToken}/sendPhoto`;
-        await fetch(telegramApi, {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -160,11 +153,14 @@ serve({
             caption: EXCLUSIVE_CONTENT.captionText,
             parse_mode: "HTML",
             reply_markup: {
-              inline_keyboard: EXCLUSIVE_CONTENT.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }])
-            }
+              inline_keyboard: EXCLUSIVE_CONTENT.actionLinks.map(link => [
+                { text: link.linkText, url: link.linkDestination },
+              ]),
+            },
           }),
         });
 
+        // Stats tracking
         const prev = (cache.get("total_messages") as number) || 0;
         const users = new Set((cache.get("users") || []) as string[]);
         const bots = new Set((cache.get("bots") || []) as string[]);
@@ -177,9 +173,9 @@ serve({
         cache.set("bots", Array.from(bots));
 
         return new Response("Message sent", { status: 200 });
-      } catch (err) {
-        console.error("Error:", err);
-        return new Response("Internal Server Error", { status: 500 });
+      } catch (e) {
+        console.error("Webhook Error:", e);
+        return new Response("Error", { status: 500 });
       }
     }
 
@@ -187,4 +183,4 @@ serve({
   },
 });
 
-console.log("✅ Bot server running on http://localhost:3000");
+console.log("✅ Server running on http://localhost:3000");
