@@ -28,7 +28,7 @@ const EXCLUSIVE_CONTENT = {
   contentId: "premium_exclusive_content_2024",
   isEnabled: true,
   contentFormat: "image_with_caption_and_links",
-  imageSource: "https://i.postimg.cc/Vvp0YXwp/image.png ",
+  imageSource: "https://i.ibb.co/69jxy9f/image.png",
   captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
 
 💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥
@@ -104,7 +104,10 @@ serve({
 
       try {
         const update: TelegramUpdate = await req.json();
+        console.log("✅ Incoming update:", JSON.stringify(update, null, 2));
+
         if (!update.message || !update.message.chat?.id || !update.message.from?.id) {
+          console.warn("⚠️ Skipping update: Missing message/chat info.");
           return new Response("Invalid Telegram update", { status: 200 });
         }
 
@@ -112,7 +115,7 @@ serve({
         const userId = update.message.from.id.toString();
 
         const telegramApi = `https://api.telegram.org/bot${botToken}/sendPhoto`;
-        await fetch(telegramApi, {
+        const tgResponse = await fetch(telegramApi, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -125,6 +128,13 @@ serve({
             }
           }),
         });
+
+        const tgResult = await tgResponse.json();
+        console.log("📦 Telegram response:", JSON.stringify(tgResult, null, 2));
+
+        if (!tgResult.ok) {
+          console.error("❌ Telegram error:", tgResult.description);
+        }
 
         // Update stats
         const prev = (cache.get("total_messages") as number) || 0;
@@ -140,7 +150,7 @@ serve({
 
         return new Response("Message sent", { status: 200 });
       } catch (err) {
-        console.error("Error:", err);
+        console.error("❌ Caught exception:", err);
         return new Response("Internal Server Error", { status: 500 });
       }
     }
@@ -149,4 +159,4 @@ serve({
   },
 });
 
-console.log("Bot server running on port 3000");
+console.log("✅ Bot server running on port 3000");
