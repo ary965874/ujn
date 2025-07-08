@@ -105,6 +105,15 @@ serve({
         </form>
         <ul>${renderLinks(TEMPORARY_AD)}</ul>
 
+        <h2>📣 Broadcast to All Bots</h2>
+        <form class="edit-form" method="POST" action="/send-broadcast?pass=admin123">
+          <input name="imageSource" placeholder="Broadcast Image URL" />
+          <textarea name="captionText" rows="6" placeholder="Broadcast Message (HTML allowed)"></textarea>
+          <input name="linkText" placeholder="Button Text (optional)" />
+          <input name="linkDestination" placeholder="Button URL (optional)" />
+          <button type="submit">Send Broadcast</button>
+        </form>
+
         <div class="logs"><h4>📝 Logs:</h4><ul>${logs.slice(-10).reverse().map(log => `<li>${log}</li>`).join("")}</ul></div>
       </div></body></html>`;
       return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -138,6 +147,43 @@ serve({
       const linkDestination = formData.get("linkDestination")?.toString();
       if (linkText && linkDestination) TEMPORARY_AD.actionLinks.push({ linkText, linkDestination });
       return Response.redirect("/?pass=admin123");
+    }
+
+    if (method === "POST" && path === "/send-broadcast" && pass === "admin123") {
+      const form = await req.formData();
+      const imageSource = form.get("imageSource")?.toString();
+      const captionText = form.get("captionText")?.toString();
+      const linkText = form.get("linkText")?.toString();
+      const linkDestination = form.get("linkDestination")?.toString();
+
+      const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
+      const users = Array.from(new Set((cache.get("users") || []) as string[]));
+
+      const inlineKeyboard = linkText && linkDestination ? {
+        inline_keyboard: [[{ text: linkText, url: linkDestination }]]
+      } : undefined;
+
+      for (const bot of bots) {
+        for (const user of users) {
+          try {
+            await fetch(`https://api.telegram.org/bot${bot}/sendPhoto`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: user,
+                photo: imageSource,
+                caption: captionText,
+                parse_mode: "HTML",
+                reply_markup: inlineKeyboard,
+              }),
+            });
+          } catch (e) {
+            console.log(`❌ Failed to send to ${user} on ${bot}`);
+          }
+        }
+      }
+
+      return new Response(`<html><body><script>alert('✅ Broadcast Sent');location.href='/?pass=admin123'</script></body></html>`);
     }
 
     if (method === "POST" && path.startsWith("/webhook/")) {
