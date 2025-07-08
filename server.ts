@@ -1,6 +1,7 @@
 import { serve } from "bun";
 import NodeCache from "node-cache";
 
+// Types
 interface TelegramUser {
   id: number;
   first_name: string;
@@ -21,8 +22,11 @@ interface TelegramUpdate {
   };
 }
 
+// In-memory cache
 const cache = new NodeCache({ stdTTL: 0 });
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Ad data
 let PERMANENT_AD = {
   imageSource: "https://i.ibb.co/J66PqCQ/x.jpg",
   captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥\n\n💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥\n\n🎬 <i>Fresh leaked content daily</i>\n🔞 <b>18+ Adult Material</b>\n💎 <i>Premium quality videos & files</i>\n🚀 <b>Instant access available</b>\n\n⬇️ <b><u>Click any server below</u></b> ⬇️`,
@@ -35,9 +39,10 @@ let PERMANENT_AD = {
 let TEMPORARY_AD = {
   imageSource: "",
   captionText: "",
-  actionLinks: [],
+  actionLinks: [] as { linkText: string; linkDestination: string }[],
 };
 
+// Server
 serve({
   port: 3000,
   async fetch(req) {
@@ -46,6 +51,7 @@ serve({
     const method = req.method;
     const pass = url.searchParams.get("pass");
 
+    // Render Dashboard
     if (method === "GET" && path === "/") {
       if (pass !== "admin123") {
         return new Response(`<!DOCTYPE html><html><head><title>Login</title><style>
@@ -63,7 +69,10 @@ serve({
       const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
       const logs = (cache.get("logs") || []) as string[];
 
-      const renderLinks = (ad) => ad.actionLinks.map(link => `<li><b>${link.linkText}</b> ➜ <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`).join("");
+      const renderLinks = (ad: any) =>
+        ad.actionLinks.map((link: any) =>
+          `<li><b>${link.linkText}</b> ➜ <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`
+        ).join("");
 
       const html = `<!DOCTYPE html><html><head><title>Dashboard</title><style>
         body { background:#121212; color:#fff; font-family:sans-serif; padding:2em; }
@@ -119,32 +128,33 @@ serve({
       return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
+    // Admin Actions
     if (method === "POST" && path === "/edit-content" && pass === "admin123") {
-      const formData = await req.formData();
-      PERMANENT_AD.imageSource = formData.get("imageSource")?.toString() || PERMANENT_AD.imageSource;
-      PERMANENT_AD.captionText = formData.get("captionText")?.toString() || PERMANENT_AD.captionText;
-      return Response.redirect("/?pass=admin123");
-    }
-
-    if (method === "POST" && path === "/edit-temp" && pass === "admin123") {
-      const formData = await req.formData();
-      TEMPORARY_AD.imageSource = formData.get("imageSource")?.toString() || TEMPORARY_AD.imageSource;
-      TEMPORARY_AD.captionText = formData.get("captionText")?.toString() || TEMPORARY_AD.captionText;
+      const form = await req.formData();
+      PERMANENT_AD.imageSource = form.get("imageSource")?.toString() || PERMANENT_AD.imageSource;
+      PERMANENT_AD.captionText = form.get("captionText")?.toString() || PERMANENT_AD.captionText;
       return Response.redirect("/?pass=admin123");
     }
 
     if (method === "POST" && path === "/add-link" && pass === "admin123") {
-      const formData = await req.formData();
-      const linkText = formData.get("linkText")?.toString();
-      const linkDestination = formData.get("linkDestination")?.toString();
+      const form = await req.formData();
+      const linkText = form.get("linkText")?.toString();
+      const linkDestination = form.get("linkDestination")?.toString();
       if (linkText && linkDestination) PERMANENT_AD.actionLinks.push({ linkText, linkDestination });
       return Response.redirect("/?pass=admin123");
     }
 
+    if (method === "POST" && path === "/edit-temp" && pass === "admin123") {
+      const form = await req.formData();
+      TEMPORARY_AD.imageSource = form.get("imageSource")?.toString() || TEMPORARY_AD.imageSource;
+      TEMPORARY_AD.captionText = form.get("captionText")?.toString() || TEMPORARY_AD.captionText;
+      return Response.redirect("/?pass=admin123");
+    }
+
     if (method === "POST" && path === "/add-temp-link" && pass === "admin123") {
-      const formData = await req.formData();
-      const linkText = formData.get("linkText")?.toString();
-      const linkDestination = formData.get("linkDestination")?.toString();
+      const form = await req.formData();
+      const linkText = form.get("linkText")?.toString();
+      const linkDestination = form.get("linkDestination")?.toString();
       if (linkText && linkDestination) TEMPORARY_AD.actionLinks.push({ linkText, linkDestination });
       return Response.redirect("/?pass=admin123");
     }
@@ -158,10 +168,9 @@ serve({
 
       const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
       const users = Array.from(new Set((cache.get("users") || []) as string[]));
-
-      const inlineKeyboard = linkText && linkDestination ? {
-        inline_keyboard: [[{ text: linkText, url: linkDestination }]]
-      } : undefined;
+      const inlineKeyboard = linkText && linkDestination
+        ? { inline_keyboard: [[{ text: linkText, url: linkDestination }]] }
+        : undefined;
 
       for (const bot of bots) {
         for (const user of users) {
@@ -177,6 +186,7 @@ serve({
                 reply_markup: inlineKeyboard,
               }),
             });
+            await sleep(300); // Avoid rate limits
           } catch (e) {
             console.log(`❌ Failed to send to ${user} on ${bot}`);
           }
@@ -186,57 +196,66 @@ serve({
       return new Response(`<html><body><script>alert('✅ Broadcast Sent');location.href='/?pass=admin123'</script></body></html>`);
     }
 
+    // Webhook handler
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
-      if (!botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) return new Response("Invalid bot token", { status: 403 });
+      if (!botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) return new Response("Invalid token", { status: 403 });
 
-      try {
-        const update: TelegramUpdate = await req.json();
-        const chatId = update.message?.chat?.id;
-        const userId = update.message?.from?.id?.toString();
-        const userText = update.message?.text?.normalize("NFKC");
+      const update: TelegramUpdate = await req.json();
+      const chatId = update.message?.chat?.id;
+      const userId = update.message?.from?.id?.toString();
 
-        if (!chatId || !userId) return new Response("OK");
+      if (!chatId || !userId) return new Response("OK");
 
-        const sendAd = async (ad) => {
-          if (!ad.imageSource || !ad.captionText) return;
-          await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: chatId,
-              photo: ad.imageSource,
-              caption: ad.captionText,
-              parse_mode: "HTML",
-              reply_markup: {
-                inline_keyboard: ad.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
-              },
-            }),
-          });
-        };
+      // Save bot token and user ID
+      const bots = cache.get("bots") || [];
+      const users = cache.get("users") || [];
+      cache.set("bots", Array.from(new Set([...bots as string[], botToken])));
+      cache.set("users", Array.from(new Set([...users as string[], userId])));
 
-        await sendAd(PERMANENT_AD);
-        setTimeout(() => sendAd(TEMPORARY_AD), 5000);
+      // Increase message count
+      let total = (cache.get("total_messages") as number) || 0;
+      cache.set("total_messages", total + 1);
 
-        const total = (cache.get("total_messages") as number) || 0;
-        const users = new Set((cache.get("users") || []) as string[]);
-        const bots = new Set((cache.get("bots") || []) as string[]);
-        const logs = (cache.get("logs") || []) as string[];
+      // Log
+      const logs = (cache.get("logs") || []) as string[];
+      logs.push(`[${new Date().toLocaleTimeString()}] ${userId} - ${update.message?.text}`);
+      cache.set("logs", logs.slice(-100));
 
-        users.add(userId);
-        bots.add(botToken);
-        logs.push(`[${new Date().toLocaleString()}] ${userId} in ${chatId}: ${userText || "[no text]"}`);
+      // Send permanent ad
+      await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          photo: PERMANENT_AD.imageSource,
+          caption: PERMANENT_AD.captionText,
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: PERMANENT_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }])
+          }
+        })
+      });
 
-        cache.set("total_messages", total + 1);
-        cache.set("users", Array.from(users));
-        cache.set("bots", Array.from(bots));
-        cache.set("logs", logs.slice(-100));
-
-        return new Response("Message sent", { status: 200 });
-      } catch (err) {
-        console.error("❌ Error:", err);
-        return new Response("Internal Error", { status: 500 });
+      // Send temporary ad (if any)
+      if (TEMPORARY_AD.imageSource && TEMPORARY_AD.captionText) {
+        await sleep(500);
+        await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            photo: TEMPORARY_AD.imageSource,
+            caption: TEMPORARY_AD.captionText,
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: TEMPORARY_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }])
+            }
+          })
+        });
       }
+
+      return new Response("OK");
     }
 
     return new Response("Not Found", { status: 404 });
