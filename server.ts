@@ -1,7 +1,7 @@
 import { serve } from "bun";
 import NodeCache from "node-cache";
 
-// Types
+// Interfaces
 interface TelegramUser {
   id: number;
   first_name: string;
@@ -15,18 +15,19 @@ interface TelegramChat {
 }
 
 interface TelegramUpdate {
-  message?: {
-    chat: TelegramChat;
-    from?: TelegramUser;
-    text?: string;
-  };
+  message?: any;
+  edited_message?: any;
+  channel_post?: any;
+  edited_channel_post?: any;
+  my_chat_member?: any;
+  chat_join_request?: any;
 }
 
-// In-memory cache
+// Cache and utilities
 const cache = new NodeCache({ stdTTL: 0 });
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Ad data
+// Ads
 let PERMANENT_AD = {
   imageSource: "https://i.ibb.co/J66PqCQ/x.jpg",
   captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥\n\n💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥\n\n🎬 <i>Fresh leaked content daily</i>\n🔞 <b>18+ Adult Material</b>\n💎 <i>Premium quality videos & files</i>\n🚀 <b>Instant access available</b>\n\n⬇️ <b><u>Click any server below</u></b> ⬇️`,
@@ -42,7 +43,7 @@ let TEMPORARY_AD = {
   actionLinks: [] as { linkText: string; linkDestination: string }[],
 };
 
-// Server
+// Start server
 serve({
   port: 3000,
   async fetch(req) {
@@ -51,81 +52,69 @@ serve({
     const method = req.method;
     const pass = url.searchParams.get("pass");
 
-    // Render Dashboard
+    // Admin Dashboard
     if (method === "GET" && path === "/") {
       if (pass !== "admin123") {
-        return new Response(`<!DOCTYPE html><html><head><title>Login</title><style>
-          body { font-family:sans-serif;background:#0e0e0e;color:white;text-align:center;padding:3em }
-          input,button { padding:10px;margin:10px;border:none;border-radius:5px }
-        </style></head><body>
-          <h2>🔒 Admin Access</h2>
-          <form method='GET'><input name='pass' placeholder='Enter Password' /><br/>
-          <button type='submit'>Login</button></form>
-        </body></html>`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+        return new Response(`<html><body><form method="GET">
+          <input name="pass" placeholder="Password" />
+          <button type="submit">Login</button></form></body></html>`, {
+          headers: { "Content-Type": "text/html" },
+        });
       }
 
-      const totalMessages = cache.get("total_messages") || 0;
+      const total = cache.get("total_messages") || 0;
       const users = Array.from(new Set((cache.get("users") || []) as string[]));
       const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
       const logs = (cache.get("logs") || []) as string[];
 
       const renderLinks = (ad: any) =>
         ad.actionLinks.map((link: any) =>
-          `<li><b>${link.linkText}</b> ➜ <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`
+          `<li><b>${link.linkText}</b>: <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`
         ).join("");
 
-      const html = `<!DOCTYPE html><html><head><title>Dashboard</title><style>
-        body { background:#121212; color:#fff; font-family:sans-serif; padding:2em; }
-        .card { background:#1e1e1e; padding:2em; border-radius:10px; max-width:900px; margin:auto; box-shadow:0 0 15px rgba(0,0,0,0.4); }
-        h1, h2 { color:#f97316; }
-        input, textarea, button { width:100%; margin:5px 0; padding:10px; border-radius:5px; border:none; }
-        button { background:#f97316; color:white; cursor:pointer; }
-        .logs { margin-top:2em; background:#222; padding:1em; border-radius:8px; max-height:200px; overflow-y:auto; }
-        .edit-form, .url-form { margin-top:2em; border-top:1px solid #333; padding-top:1em; }
-      </style></head><body><div class="card">
+      return new Response(`<!DOCTYPE html><html><body style="background:#111;color:#fff;padding:2em">
         <h1>📊 Bot Dashboard</h1>
-        <p><b>✅ Total Messages Sent:</b> ${totalMessages}</p>
-        <p><b>🤖 Bots Connected:</b> ${bots.length}</p>
-        <p><b>👥 Unique Users:</b> ${users.length}</p>
+        <p>Total Messages: ${total}</p>
+        <p>Bots: ${bots.length}</p>
+        <p>Users: ${users.length}</p>
 
-        <h2>📌 Permanent Ad</h2>
-        <form class="edit-form" method="POST" action="/edit-content?pass=admin123">
-          <input name="imageSource" value="${PERMANENT_AD.imageSource}" placeholder="Image URL" required />
-          <textarea name="captionText" rows="6">${PERMANENT_AD.captionText}</textarea>
-          <button type="submit">Update Permanent Ad</button>
+        <h2>Permanent Ad</h2>
+        <form method="POST" action="/edit-content?pass=admin123">
+          <input name="imageSource" value="${PERMANENT_AD.imageSource}" /><br/>
+          <textarea name="captionText" rows="6">${PERMANENT_AD.captionText}</textarea><br/>
+          <button type="submit">Update</button>
         </form>
-        <form class="url-form" method="POST" action="/add-link?pass=admin123">
-          <input name="linkText" placeholder="Button Text" required />
-          <input name="linkDestination" placeholder="Destination URL" required />
+        <form method="POST" action="/add-link?pass=admin123">
+          <input name="linkText" placeholder="Button Text" />
+          <input name="linkDestination" placeholder="Destination URL" />
           <button type="submit">Add Button</button>
         </form>
         <ul>${renderLinks(PERMANENT_AD)}</ul>
 
-        <h2>🕒 Temporary Ad</h2>
-        <form class="edit-form" method="POST" action="/edit-temp?pass=admin123">
-          <input name="imageSource" value="${TEMPORARY_AD.imageSource}" placeholder="Image URL" />
-          <textarea name="captionText" rows="6">${TEMPORARY_AD.captionText}</textarea>
-          <button type="submit">Update Temporary Ad</button>
+        <h2>Temporary Ad</h2>
+        <form method="POST" action="/edit-temp?pass=admin123">
+          <input name="imageSource" value="${TEMPORARY_AD.imageSource}" /><br/>
+          <textarea name="captionText" rows="6">${TEMPORARY_AD.captionText}</textarea><br/>
+          <button type="submit">Update Temp Ad</button>
         </form>
-        <form class="url-form" method="POST" action="/add-temp-link?pass=admin123">
+        <form method="POST" action="/add-temp-link?pass=admin123">
           <input name="linkText" placeholder="Button Text" />
           <input name="linkDestination" placeholder="Destination URL" />
           <button type="submit">Add Temp Button</button>
         </form>
         <ul>${renderLinks(TEMPORARY_AD)}</ul>
 
-        <h2>📣 Broadcast to All Bots</h2>
-        <form class="edit-form" method="POST" action="/send-broadcast?pass=admin123">
-          <input name="imageSource" placeholder="Broadcast Image URL" />
-          <textarea name="captionText" rows="6" placeholder="Broadcast Message (HTML allowed)"></textarea>
+        <h2>📣 Broadcast</h2>
+        <form method="POST" action="/send-broadcast?pass=admin123">
+          <input name="imageSource" placeholder="Image URL" /><br/>
+          <textarea name="captionText" rows="6"></textarea><br/>
           <input name="linkText" placeholder="Button Text (optional)" />
           <input name="linkDestination" placeholder="Button URL (optional)" />
-          <button type="submit">Send Broadcast</button>
+          <button type="submit">Send</button>
         </form>
 
-        <div class="logs"><h4>📝 Logs:</h4><ul>${logs.slice(-10).reverse().map(log => `<li>${log}</li>`).join("")}</ul></div>
-      </div></body></html>`;
-      return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+        <h3>Logs</h3><ul>${logs.slice(-10).reverse().map(log => `<li>${log}</li>`).join("")}</ul>
+      </body></html>`, { headers: { "Content-Type": "text/html" } });
     }
 
     // Admin Actions
@@ -146,8 +135,8 @@ serve({
 
     if (method === "POST" && path === "/edit-temp" && pass === "admin123") {
       const form = await req.formData();
-      TEMPORARY_AD.imageSource = form.get("imageSource")?.toString() || TEMPORARY_AD.imageSource;
-      TEMPORARY_AD.captionText = form.get("captionText")?.toString() || TEMPORARY_AD.captionText;
+      TEMPORARY_AD.imageSource = form.get("imageSource")?.toString() || "";
+      TEMPORARY_AD.captionText = form.get("captionText")?.toString() || "";
       return Response.redirect("/?pass=admin123");
     }
 
@@ -161,14 +150,13 @@ serve({
 
     if (method === "POST" && path === "/send-broadcast" && pass === "admin123") {
       const form = await req.formData();
-      const imageSource = form.get("imageSource")?.toString();
-      const captionText = form.get("captionText")?.toString();
+      const imageSource = form.get("imageSource")?.toString() || "";
+      const captionText = form.get("captionText")?.toString() || "";
       const linkText = form.get("linkText")?.toString();
       const linkDestination = form.get("linkDestination")?.toString();
-
       const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
       const users = Array.from(new Set((cache.get("users") || []) as string[]));
-      const inlineKeyboard = linkText && linkDestination
+      const keyboard = (linkText && linkDestination)
         ? { inline_keyboard: [[{ text: linkText, url: linkDestination }]] }
         : undefined;
 
@@ -183,11 +171,11 @@ serve({
                 photo: imageSource,
                 caption: captionText,
                 parse_mode: "HTML",
-                reply_markup: inlineKeyboard,
+                reply_markup: keyboard,
               }),
             });
-            await sleep(300); // Avoid rate limits
-          } catch (e) {
+            await sleep(300);
+          } catch {
             console.log(`❌ Failed to send to ${user} on ${bot}`);
           }
         }
@@ -196,33 +184,61 @@ serve({
       return new Response(`<html><body><script>alert('✅ Broadcast Sent');location.href='/?pass=admin123'</script></body></html>`);
     }
 
-    // Webhook handler
+    // Webhook Handler
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
       if (!botToken.match(/^\d+:[A-Za-z0-9_-]+$/)) return new Response("Invalid token", { status: 403 });
 
       const update: TelegramUpdate = await req.json();
-      const chatId = update.message?.chat?.id;
-      const userId = update.message?.from?.id?.toString();
+      let chatId: number | undefined;
+      let userId: string | undefined;
+      let activityLog = "";
 
-      if (!chatId || !userId) return new Response("OK");
+      if (update.message) {
+        chatId = update.message.chat.id;
+        userId = update.message.from?.id.toString();
+        activityLog = `Message: ${update.message.text}`;
+      } else if (update.edited_message) {
+        chatId = update.edited_message.chat.id;
+        userId = update.edited_message.from?.id.toString();
+        activityLog = `Edited Message: ${update.edited_message.text}`;
+      } else if (update.channel_post) {
+        chatId = update.channel_post.chat.id;
+        activityLog = `Channel Post: ${update.channel_post.text}`;
+      } else if (update.edited_channel_post) {
+        chatId = update.edited_channel_post.chat.id;
+        activityLog = `Edited Channel Post: ${update.edited_channel_post.text}`;
+      } else if (update.my_chat_member) {
+        chatId = update.my_chat_member.chat.id;
+        userId = update.my_chat_member.from.id.toString();
+        activityLog = `Status Update: ${JSON.stringify(update.my_chat_member.new_chat_member)}`;
+      } else if (update.chat_join_request) {
+        chatId = update.chat_join_request.chat.id;
+        userId = update.chat_join_request.from.id.toString();
+        activityLog = `Join Request from @${update.chat_join_request.from.username}`;
+      }
 
-      // Save bot token and user ID
+      if (!chatId) return new Response("OK");
+
       const bots = cache.get("bots") || [];
       const users = cache.get("users") || [];
+      if (userId) cache.set("users", Array.from(new Set([...users as string[], userId])));
       cache.set("bots", Array.from(new Set([...bots as string[], botToken])));
-      cache.set("users", Array.from(new Set([...users as string[], userId])));
 
-      // Increase message count
-      let total = (cache.get("total_messages") as number) || 0;
+      const total = (cache.get("total_messages") as number) || 0;
       cache.set("total_messages", total + 1);
 
-      // Log
       const logs = (cache.get("logs") || []) as string[];
-      logs.push(`[${new Date().toLocaleTimeString()}] ${userId} - ${update.message?.text}`);
+      logs.push(`[${new Date().toLocaleTimeString()}] ${userId || "?"} - ${activityLog}`);
       cache.set("logs", logs.slice(-100));
 
-      // Send permanent ad
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: `📢 Activity: ${activityLog}` }),
+      });
+
+      await sleep(300);
       await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -232,12 +248,11 @@ serve({
           caption: PERMANENT_AD.captionText,
           parse_mode: "HTML",
           reply_markup: {
-            inline_keyboard: PERMANENT_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }])
-          }
-        })
+            inline_keyboard: PERMANENT_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
+          },
+        }),
       });
 
-      // Send temporary ad (if any)
       if (TEMPORARY_AD.imageSource && TEMPORARY_AD.captionText) {
         await sleep(500);
         await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
@@ -249,9 +264,9 @@ serve({
             caption: TEMPORARY_AD.captionText,
             parse_mode: "HTML",
             reply_markup: {
-              inline_keyboard: TEMPORARY_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }])
-            }
-          })
+              inline_keyboard: TEMPORARY_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
+            },
+          }),
         });
       }
 
@@ -262,4 +277,4 @@ serve({
   },
 });
 
-console.log("✅ Bot server running at http://localhost:3000");
+console.log("✅ Combined bot server running on http://localhost:3000");
