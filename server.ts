@@ -10,6 +10,9 @@ interface TelegramUser {
 interface TelegramChat {
   id: number;
   type: string;
+  username?: string;
+  title?: string;
+  invite_link?: string;
 }
 interface TelegramUpdate {
   message?: any;
@@ -58,10 +61,10 @@ serve({
       const total = cache.get("total_messages") || 0;
       const users = Array.from(new Set((cache.get("users") || []) as string[]));
       const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
-      const channels = Array.from(new Set((cache.get("channels") || []) as string[]));
+      const chatLinks = cache.get("chat_links") || {};
       const logs = (cache.get("logs") || []) as string[];
 
-      const channelLinks = channels.map((id: string) => `<li><a target="_blank" href="https://t.me/c/${id.replace("-100", "")}">https://t.me/c/${id.replace("-100", "")}</a></li>`).join("");
+      const channelLinks = Object.entries(chatLinks).map(([id, link]: any) => `<li><a target="_blank" href="${link}">${link}</a></li>`).join("");
 
       return new Response(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
         body { background:black; color:white; font-family:sans-serif; padding:2em; }
@@ -73,7 +76,6 @@ serve({
         <h1>📊 Bot Dashboard</h1>
         <p><b>Total Messages:</b> ${total}</p>
         <p><b>Users:</b> ${users.length}</p>
-        <p><b>Channels/Groups:</b> ${channels.length}</p>
         <p><b>Bots:</b> ${bots.length}</p>
         <form method='POST' action='/send-to-channels?pass=admin123'>
           <button type='submit'>📢 Send Ads to All Channels</button>
@@ -89,10 +91,10 @@ serve({
 
     if (method === "POST" && path === "/send-to-channels" && pass === "admin123") {
       const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
-      const channels = Array.from(new Set((cache.get("channels") || []) as string[]));
+      const chatLinks = cache.get("chat_links") || {};
 
       for (const bot of bots) {
-        for (const chatId of channels) {
+        for (const chatId of Object.keys(chatLinks)) {
           await fetch(`https://api.telegram.org/bot${bot}/sendPhoto`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -168,9 +170,26 @@ serve({
         }
 
         const users = cache.get("users") || [];
-        const channels = cache.get("channels") || [];
+        const chatLinks = cache.get("chat_links") || {};
         if (userId) cache.set("users", Array.from(new Set([...users as string[], userId])));
-        cache.set("channels", Array.from(new Set([...channels as string[], chatId.toString()])));
+
+        // Fetch readable link
+        if (!chatLinks[chatId]) {
+          const resp = await fetch(`https://api.telegram.org/bot${botToken}/getChat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId })
+          });
+          const result = await resp.json();
+          if (result.ok) {
+            const info = result.result;
+            const link = info.username
+              ? `https://t.me/${info.username}`
+              : info.invite_link || `https://t.me/c/${String(chatId).replace("-100", "")}`;
+            chatLinks[chatId] = link;
+            cache.set("chat_links", chatLinks);
+          }
+        }
 
         const total = (cache.get("total_messages") as number) || 0;
         cache.set("total_messages", total + 1);
