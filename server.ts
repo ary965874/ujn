@@ -61,15 +61,28 @@ serve({
       const channels = Array.from(new Set((cache.get("channels") || []) as string[]));
       const logs = (cache.get("logs") || []) as string[];
 
-      return new Response(`<!DOCTYPE html><html><body style='background:black;color:white;font-family:sans-serif'>
-        <h1>📊 Dashboard</h1>
-        <p>Total Messages: ${total}</p>
-        <p>Users: ${users.length}</p>
-        <p>Channels/Groups: ${channels.length}</p>
-        <p>Bots: ${bots.length}</p>
+      const channelLinks = channels.map((id: string) => `<li><a target="_blank" href="https://t.me/c/${id.replace("-100", "")}">https://t.me/c/${id.replace("-100", "")}</a></li>`).join("");
+
+      return new Response(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+        body { background:black; color:white; font-family:sans-serif; padding:2em; }
+        h1, h2 { color: #f97316; }
+        button { padding: 10px 20px; margin: 10px 0; background: #f97316; border: none; border-radius: 5px; color: white; font-weight: bold; cursor: pointer; }
+        pre { background: #1e1e1e; padding: 1em; border-radius: 8px; max-height: 300px; overflow-y: auto; }
+        ul { padding-left: 1.2em; }
+      </style></head><body>
+        <h1>📊 Bot Dashboard</h1>
+        <p><b>Total Messages:</b> ${total}</p>
+        <p><b>Users:</b> ${users.length}</p>
+        <p><b>Channels/Groups:</b> ${channels.length}</p>
+        <p><b>Bots:</b> ${bots.length}</p>
         <form method='POST' action='/send-to-channels?pass=admin123'>
           <button type='submit'>📢 Send Ads to All Channels</button>
         </form>
+
+        <h2>📂 Channels Posting Ad Links</h2>
+        <ul>${channelLinks}</ul>
+
+        <h2>📝 Recent Logs</h2>
         <pre>${logs.slice(-20).reverse().join("\n")}</pre>
       </body></html>`, { headers: { "Content-Type": "text/html" } });
     }
