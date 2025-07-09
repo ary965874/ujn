@@ -55,7 +55,7 @@ serve({
     if (method === "GET" && path === "/") {
       if (pass !== "admin123") {
         return new Response(`<!DOCTYPE html><html><body><h2>🔐 Access Denied</h2></body></html>`, {
-          headers: { "Content-Type": "text/html" },
+         headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       }
 
