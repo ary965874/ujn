@@ -30,7 +30,16 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // Ads
 let PERMANENT_AD = {
   imageSource: "https://i.ibb.co/J66PqCQ/x.jpg",
-  captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥\n\n💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥\n\n🎬 <i>Fresh leaked content daily</i>\n🔞 <b>18+ Adult Material</b>\n💎 <i>Premium quality videos & files</i>\n🚀 <b>Instant access available</b>\n\n⬇️ <b><u>Click any server below</u></b> ⬇️`,
+  captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
+
+💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥
+
+🎬 <i>Fresh leaked content daily</i>
+🔞 <b>18+ Adult Material</b>
+💎 <i>Premium quality videos & files</i>
+🚀 <b>Instant access available</b>
+
+⬇️ <b><u>Click any server below</u></b> ⬇️`,
   actionLinks: [
     { linkText: "🎥 VIDEOS💦", linkDestination: "https://t.me/+Go8FEdh9M8Y3ZWU1" },
     { linkText: "📁 FILES🍑", linkDestination: "https://t.me/+06bZb-fbn4kzNjll" },
@@ -55,7 +64,7 @@ serve({
     if (method === "GET" && path === "/") {
       if (pass !== "admin123") {
         return new Response(`<!DOCTYPE html><html><body><h2>🔐 Access Denied</h2></body></html>`, {
-         headers: { "Content-Type": "text/html; charset=utf-8" },
+          headers: { "Content-Type": "text/html" },
         });
       }
 
@@ -67,15 +76,19 @@ serve({
       const sentChannels = cache.get("sent_channels") || [];
 
       const renderLinks = (ad: any) =>
-        ad.actionLinks.map((link: any) =>
-          `<li><b>${link.linkText}</b>: <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`
-        ).join("");
+        ad.actionLinks
+          .map(
+            (link: any) =>
+              `<li><b>${link.linkText}</b>: <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`
+          )
+          .join("");
 
-      const renderChannels = (channels as { id: string; link: string }[]).map(
-        c => `<li><a href="${c.link}" target="_blank">${c.link}</a> (ID: ${c.id})</li>`
-      ).join("");
+      const renderChannels = (channels as { id: string; link: string }[])
+        .map((c) => `<li><a href="${c.link}" target="_blank">${c.link}</a> (ID: ${c.id})</li>`)
+        .join("");
 
-      return new Response(`<!DOCTYPE html><html><head><title>Dashboard</title><style>
+      return new Response(
+        `<!DOCTYPE html><html><head><title>Dashboard</title><style>
         body { font-family: sans-serif; background: #121212; color: #fff; padding: 2em; }
         .card { max-width: 900px; margin: auto; padding: 2em; background: #1f1f1f; border-radius: 10px; }
         input, textarea, button { width: 100%; padding: 10px; margin: 10px 0; border: none; border-radius: 5px; }
@@ -88,7 +101,12 @@ serve({
         <p><b>Users:</b> ${users.length}</p>
 
         <h2>📡 Channels Detected</h2><ul>${renderChannels}</ul>
-        <h2>📤 Channels Sent</h2><ul>${(sentChannels as any[]).map(c => `<li><a href="${c.link}" target="_blank">${c.link}</a> (ID: ${c.id})</li>`).join("")}</ul>
+        <h2>📤 Channels Sent</h2><ul>${(sentChannels as any[])
+          .map(
+            (c) =>
+              `<li><a href="${c.link}" target="_blank">${c.link}</a> (ID: ${c.id})</li>`
+          )
+          .join("")}</ul>
 
         <h2>📌 Permanent Ad</h2>
         <form method="POST" action="/edit-content?pass=admin123">
@@ -126,8 +144,14 @@ serve({
         </form>
 
         <h3>📝 Logs</h3>
-        <ul>${logs.slice(-10).reverse().map(log => `<li>${log}</li>`).join("")}</ul>
-      </div></body></html>`, { headers: { "Content-Type": "text/html" } });
+        <ul>${logs
+          .slice(-10)
+          .reverse()
+          .map((log) => `<li>${log}</li>`)
+          .join("")}</ul>
+      </div></body></html>`,
+        { headers: { "Content-Type": "text/html" } }
+      );
     }
 
     // Admin Actions
@@ -161,7 +185,8 @@ serve({
         const captionText = form.get("captionText")?.toString();
         const linkText = form.get("linkText")?.toString();
         const linkDestination = form.get("linkDestination")?.toString();
-        const keyboard = linkText && linkDestination ? { inline_keyboard: [[{ text: linkText, url: linkDestination }]] } : undefined;
+        const keyboard =
+          linkText && linkDestination ? { inline_keyboard: [[{ text: linkText, url: linkDestination }]] } : undefined;
         const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
         const users = Array.from(new Set((cache.get("users") || []) as string[]));
         for (const bot of bots) {
@@ -195,7 +220,7 @@ serve({
           chatLink = chat.username ? `https://t.me/${chat.username}` : `https://t.me/c/${String(chat.id).substring(4)}`;
           const channels = cache.get("channels") || [];
           const entry = { id: chat.id.toString(), link: chatLink };
-          const updated = Array.from(new Map([...(channels as any[]), entry].map(c => [c.id, c])).values());
+          const updated = Array.from(new Map([...(channels as any[]), entry].map((c) => [c.id, c])).values());
           cache.set("channels", updated);
         } else {
           userId = chat.id.toString();
@@ -234,7 +259,7 @@ serve({
           caption: PERMANENT_AD.captionText,
           parse_mode: "HTML",
           reply_markup: {
-            inline_keyboard: PERMANENT_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
+            inline_keyboard: PERMANENT_AD.actionLinks.map((link) => [{ text: link.linkText, url: link.linkDestination }]),
           },
         }),
       });
@@ -251,7 +276,7 @@ serve({
             caption: TEMPORARY_AD.captionText,
             parse_mode: "HTML",
             reply_markup: {
-              inline_keyboard: TEMPORARY_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
+              inline_keyboard: TEMPORARY_AD.actionLinks.map((link) => [{ text: link.linkText, url: link.linkDestination }]),
             },
           }),
         });
@@ -261,7 +286,7 @@ serve({
       if (chatLink) {
         const sent = cache.get("sent_channels") || [];
         const entry = { id: chatId.toString(), link: chatLink };
-        const updated = Array.from(new Map([...(sent as any[]), entry].map(c => [c.id, c])).values());
+        const updated = Array.from(new Map([...(sent as any[]), entry].map((c) => [c.id, c])).values());
         cache.set("sent_channels", updated);
       }
 
