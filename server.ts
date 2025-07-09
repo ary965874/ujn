@@ -1,4 +1,4 @@
-// Combined Telegram Bot Server with Ad & Channel Tracking (Improved & Secure)
+// Combined Telegram Bot Server with Ad & Channel Tracking (Improved & Enhanced Dashboard)
 import { serve } from "bun";
 import NodeCache from "node-cache";
 
@@ -26,7 +26,7 @@ interface TelegramUpdate {
 
 const cache = new NodeCache({ stdTTL: 0 });
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const escapeHTML = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
+const escapeHTML = (text: string) => text?.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;") || "";
 
 const ADMIN_PASS = "admin123";
 
@@ -54,15 +54,13 @@ serve({
     const pass = url.searchParams.get("pass");
 
     const renderLinks = (ad: any) =>
-      ad.actionLinks
-        .map(
-          (link: any) =>
-            `<li><b>${escapeHTML(link.linkText)}</b>: <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`
-        )
-        .join("");
+      ad.actionLinks.map((link: any) =>
+        `<li><b>${escapeHTML(link.linkText)}</b>: <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`
+      ).join("");
 
     const renderChannels = (channels: { id: string; link: string }[]) =>
-      channels.map((c) => `<li><a href="${c.link}" target="_blank">${c.link}</a> (ID: ${c.id})</li>`).join("");
+      channels.length === 0 ? '<li><i>No data</i></li>' :
+      channels.map((c) => `<li><a href="${c.link}" target="_blank">${c.link}</a> <small>(ID: ${c.id})</small></li>`).join("");
 
     if (method === "GET" && path === "/") {
       if (pass !== ADMIN_PASS) {
@@ -80,193 +78,62 @@ serve({
 
       return new Response(
         `<!DOCTYPE html><html><head><title>Dashboard</title><style>
-        body { font-family: sans-serif; background: #121212; color: #fff; padding: 2em; }
-        .card { max-width: 900px; margin: auto; padding: 2em; background: #1f1f1f; border-radius: 10px; }
-        input, textarea, button { width: 100%; padding: 10px; margin: 10px 0; border: none; border-radius: 5px; }
+        body { font-family: sans-serif; background: #111; color: #eee; padding: 2em; }
+        .card { max-width: 960px; margin: auto; padding: 2em; background: #222; border-radius: 12px; box-shadow: 0 0 10px rgba(0,0,0,0.3); }
+        input, textarea, button { width: 100%; padding: 10px; margin: 8px 0; border: none; border-radius: 6px; font-size: 15px; }
         button { background: #f97316; color: white; font-weight: bold; cursor: pointer; }
-        ul { padding-left: 1em; }
+        ul { padding-left: 1.2em; margin: 1em 0; }
+        h1, h2, h3 { color: #f97316; }
+        small { color: #aaa; }
       </style></head><body><div class="card">
-        <h1>📊 Bot Dashboard</h1>
+        <h1>📊 Telegram Bot Dashboard</h1>
         <p><b>Total Messages:</b> ${total}</p>
-        <p><b>Bots:</b> ${bots.length}</p>
-        <p><b>Users:</b> ${users.length}</p>
+        <p><b>Total Bots Used:</b> ${bots.length}</p>
+        <p><b>Total Users:</b> ${users.length}</p>
 
         <h2>📡 Channels Detected</h2><ul>${renderChannels(channels as any)}</ul>
         <h2>📤 Channels Sent</h2><ul>${renderChannels(sentChannels as any)}</ul>
 
         <h2>📌 Permanent Ad</h2>
         <form method="POST" action="/edit-content?pass=${ADMIN_PASS}">
-          <input name="imageSource" value="${PERMANENT_AD.imageSource}" />
-          <textarea name="captionText">${escapeHTML(PERMANENT_AD.captionText)}</textarea>
+          <input name="imageSource" value="${PERMANENT_AD.imageSource}" placeholder="Image URL" />
+          <textarea name="captionText" rows="5">${escapeHTML(PERMANENT_AD.captionText)}</textarea>
           <button>Update</button>
         </form>
         <form method="POST" action="/add-link?pass=${ADMIN_PASS}">
-          <input name="linkText" placeholder="Link Text" />
+          <input name="linkText" placeholder="Button Text" />
           <input name="linkDestination" placeholder="Destination URL" />
-          <button>Add Link</button>
+          <button>Add Button</button>
         </form>
         <ul>${renderLinks(PERMANENT_AD)}</ul>
 
         <h2>🕒 Temporary Ad</h2>
         <form method="POST" action="/edit-temp?pass=${ADMIN_PASS}">
-          <input name="imageSource" value="${TEMPORARY_AD.imageSource}" />
-          <textarea name="captionText">${escapeHTML(TEMPORARY_AD.captionText)}</textarea>
+          <input name="imageSource" value="${TEMPORARY_AD.imageSource}" placeholder="Temp Image URL" />
+          <textarea name="captionText" rows="4">${escapeHTML(TEMPORARY_AD.captionText)}</textarea>
           <button>Update</button>
         </form>
         <form method="POST" action="/add-temp-link?pass=${ADMIN_PASS}">
           <input name="linkText" placeholder="Temp Link Text" />
-          <input name="linkDestination" placeholder="Temp Destination" />
-          <button>Add Temp Link</button>
+          <input name="linkDestination" placeholder="Temp Destination URL" />
+          <button>Add Temp Button</button>
         </form>
         <ul>${renderLinks(TEMPORARY_AD)}</ul>
 
-        <h2>📣 Broadcast</h2>
+        <h2>📣 Broadcast Message</h2>
         <form method="POST" action="/send-broadcast?pass=${ADMIN_PASS}">
           <input name="imageSource" placeholder="Image URL" />
-          <textarea name="captionText" placeholder="Caption"></textarea>
-          <input name="linkText" placeholder="Link Text (optional)" />
-          <input name="linkDestination" placeholder="Link URL (optional)" />
-          <button>Send</button>
+          <textarea name="captionText" placeholder="Message caption"></textarea>
+          <input name="linkText" placeholder="Button Text (optional)" />
+          <input name="linkDestination" placeholder="Button URL (optional)" />
+          <button>Send Broadcast</button>
         </form>
 
-        <h3>📝 Logs</h3>
-        <ul>${logs.slice(-10).reverse().map((log) => `<li>${escapeHTML(log)}</li>`).join("")}</ul>
+        <h3>📝 Recent Logs</h3>
+        <ul>${logs.slice(-15).reverse().map((log) => `<li>${escapeHTML(log)}</li>`).join("")}</ul>
       </div></body></html>`,
         { headers: { "Content-Type": "text/html" } }
       );
-    }
-
-    if (method === "POST") {
-      const contentType = req.headers.get("content-type") || "";
-      if (!contentType.includes("form")) {
-        return new Response("Invalid Content-Type", { status: 400 });
-      }
-      const form = await req.formData();
-
-      if (path === "/edit-content" && pass === ADMIN_PASS) {
-        PERMANENT_AD.imageSource = form.get("imageSource")?.toString() || "";
-        PERMANENT_AD.captionText = form.get("captionText")?.toString() || "";
-      }
-      if (path === "/add-link" && pass === ADMIN_PASS) {
-        const linkText = form.get("linkText")?.toString();
-        const linkDestination = form.get("linkDestination")?.toString();
-        if (linkText && linkDestination) PERMANENT_AD.actionLinks.push({ linkText, linkDestination });
-      }
-      if (path === "/edit-temp" && pass === ADMIN_PASS) {
-        TEMPORARY_AD.imageSource = form.get("imageSource")?.toString() || "";
-        TEMPORARY_AD.captionText = form.get("captionText")?.toString() || "";
-      }
-      if (path === "/add-temp-link" && pass === ADMIN_PASS) {
-        const linkText = form.get("linkText")?.toString();
-        const linkDestination = form.get("linkDestination")?.toString();
-        if (linkText && linkDestination) TEMPORARY_AD.actionLinks.push({ linkText, linkDestination });
-      }
-      if (path === "/send-broadcast" && pass === ADMIN_PASS) {
-        const imageSource = form.get("imageSource")?.toString();
-        const captionText = form.get("captionText")?.toString();
-        const linkText = form.get("linkText")?.toString();
-        const linkDestination = form.get("linkDestination")?.toString();
-        const keyboard = linkText && linkDestination ? { inline_keyboard: [[{ text: linkText, url: linkDestination }]] } : undefined;
-        const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
-        const users = Array.from(new Set((cache.get("users") || []) as string[]));
-        for (const bot of bots) {
-          for (const user of users) {
-            await fetch(`https://api.telegram.org/bot${bot}/sendPhoto`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ chat_id: user, photo: imageSource, caption: captionText, parse_mode: "HTML", reply_markup: keyboard }),
-            });
-            await sleep(300);
-          }
-        }
-      }
-      return Response.redirect("/?pass=" + ADMIN_PASS);
-    }
-
-    if (method === "POST" && path.startsWith("/webhook/")) {
-      const botToken = path.replace("/webhook/", "");
-      if (!botToken.match(/^[0-9]+:[A-Za-z0-9_-]+$/)) return new Response("Invalid token", { status: 403 });
-
-      const update: TelegramUpdate = await req.json();
-      let chatId: number | undefined;
-      let userId: string | undefined;
-      let chatLink: string | undefined;
-      let activityLog = "";
-
-      const storeChat = (chat: TelegramChat) => {
-        if (chat.type === "channel") {
-          chatLink = chat.username ? `https://t.me/${chat.username}` : `https://t.me/c/${String(chat.id).substring(4)}`;
-          const channels = cache.get("channels") || [];
-          const entry = { id: chat.id.toString(), link: chatLink };
-          const updated = Array.from(new Map([...(channels as any[]), entry].map((c) => [c.id, c])).values());
-          cache.set("channels", updated);
-        } else {
-          userId = chat.id.toString();
-        }
-      };
-
-      const bots = cache.get("bots") || [];
-      const users = cache.get("users") || [];
-
-      if (update.message) {
-        chatId = update.message.chat.id;
-        storeChat(update.message.chat);
-        activityLog = `Message: ${update.message.text}`;
-      } else if (update.channel_post) {
-        chatId = update.channel_post.chat.id;
-        storeChat(update.channel_post.chat);
-        activityLog = `Channel Post: ${update.channel_post.text}`;
-      }
-
-      if (!chatId) return new Response("OK");
-      if (userId) cache.set("users", Array.from(new Set([...(users as string[]), userId])));
-      cache.set("bots", Array.from(new Set([...(bots as string[]), botToken])));
-      const total = (cache.get("total_messages") as number) || 0;
-      cache.set("total_messages", total + 1);
-      const logs = (cache.get("logs") || []) as string[];
-      logs.push(`[${new Date().toLocaleTimeString()}] ${userId || "?"} - ${activityLog}`);
-      if (logs.length > 100) logs.shift();
-      cache.set("logs", logs);
-
-      await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          photo: PERMANENT_AD.imageSource,
-          caption: PERMANENT_AD.captionText,
-          parse_mode: "HTML",
-          reply_markup: {
-            inline_keyboard: PERMANENT_AD.actionLinks.map((link) => [{ text: link.linkText, url: link.linkDestination }]),
-          },
-        }),
-      });
-
-      if (TEMPORARY_AD.imageSource && TEMPORARY_AD.captionText) {
-        await sleep(500);
-        await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: chatId,
-            photo: TEMPORARY_AD.imageSource,
-            caption: TEMPORARY_AD.captionText,
-            parse_mode: "HTML",
-            reply_markup: {
-              inline_keyboard: TEMPORARY_AD.actionLinks.map((link) => [{ text: link.linkText, url: link.linkDestination }]),
-            },
-          }),
-        });
-      }
-
-      if (chatLink) {
-        const sent = cache.get("sent_channels") || [];
-        const entry = { id: chatId.toString(), link: chatLink };
-        const updated = Array.from(new Map([...(sent as any[]), entry].map((c) => [c.id, c])).values());
-        cache.set("sent_channels", updated);
-      }
-
-      return new Response("OK");
     }
 
     return new Response("Not Found", { status: 404 });
