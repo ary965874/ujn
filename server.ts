@@ -1,4 +1,4 @@
-// Combined Telegram Bot Server with Ad & Channel Tracking
+// Combined Telegram Bot Server with Ad & Channel Tracking (Improved & Secure)
 import { serve } from "bun";
 import NodeCache from "node-cache";
 
@@ -26,20 +26,13 @@ interface TelegramUpdate {
 
 const cache = new NodeCache({ stdTTL: 0 });
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const escapeHTML = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
 
-// Ads
+const ADMIN_PASS = "admin123";
+
 let PERMANENT_AD = {
   imageSource: "https://i.ibb.co/J66PqCQ/x.jpg",
-  captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥
-
-💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥
-
-🎬 <i>Fresh leaked content daily</i>
-🔞 <b>18+ Adult Material</b>
-💎 <i>Premium quality videos & files</i>
-🚀 <b>Instant access available</b>
-
-⬇️ <b><u>Click any server below</u></b> ⬇️`,
+  captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥\n\n💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥\n\n🎬 <i>Fresh leaked content daily</i>\n🔞 <b>18+ Adult Material</b>\n💎 <i>Premium quality videos & files</i>\n🚀 <b>Instant access available</b>\n\n⬇️ <b><u>Click any server below</u></b> ⬇️`,
   actionLinks: [
     { linkText: "🎥 VIDEOS💦", linkDestination: "https://t.me/+Go8FEdh9M8Y3ZWU1" },
     { linkText: "📁 FILES🍑", linkDestination: "https://t.me/+06bZb-fbn4kzNjll" },
@@ -60,9 +53,19 @@ serve({
     const method = req.method;
     const pass = url.searchParams.get("pass");
 
-    // Admin Dashboard
+    const renderLinks = (ad: any) =>
+      ad.actionLinks
+        .map(
+          (link: any) =>
+            `<li><b>${escapeHTML(link.linkText)}</b>: <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`
+        )
+        .join("");
+
+    const renderChannels = (channels: { id: string; link: string }[]) =>
+      channels.map((c) => `<li><a href="${c.link}" target="_blank">${c.link}</a> (ID: ${c.id})</li>`).join("");
+
     if (method === "GET" && path === "/") {
-      if (pass !== "admin123") {
+      if (pass !== ADMIN_PASS) {
         return new Response(`<!DOCTYPE html><html><body><h2>🔐 Access Denied</h2></body></html>`, {
           headers: { "Content-Type": "text/html" },
         });
@@ -74,18 +77,6 @@ serve({
       const logs = (cache.get("logs") || []) as string[];
       const channels = cache.get("channels") || [];
       const sentChannels = cache.get("sent_channels") || [];
-
-      const renderLinks = (ad: any) =>
-        ad.actionLinks
-          .map(
-            (link: any) =>
-              `<li><b>${link.linkText}</b>: <a href="${link.linkDestination}" target="_blank">${link.linkDestination}</a></li>`
-          )
-          .join("");
-
-      const renderChannels = (channels as { id: string; link: string }[])
-        .map((c) => `<li><a href="${c.link}" target="_blank">${c.link}</a> (ID: ${c.id})</li>`)
-        .join("");
 
       return new Response(
         `<!DOCTYPE html><html><head><title>Dashboard</title><style>
@@ -100,21 +91,16 @@ serve({
         <p><b>Bots:</b> ${bots.length}</p>
         <p><b>Users:</b> ${users.length}</p>
 
-        <h2>📡 Channels Detected</h2><ul>${renderChannels}</ul>
-        <h2>📤 Channels Sent</h2><ul>${(sentChannels as any[])
-          .map(
-            (c) =>
-              `<li><a href="${c.link}" target="_blank">${c.link}</a> (ID: ${c.id})</li>`
-          )
-          .join("")}</ul>
+        <h2>📡 Channels Detected</h2><ul>${renderChannels(channels as any)}</ul>
+        <h2>📤 Channels Sent</h2><ul>${renderChannels(sentChannels as any)}</ul>
 
         <h2>📌 Permanent Ad</h2>
-        <form method="POST" action="/edit-content?pass=admin123">
+        <form method="POST" action="/edit-content?pass=${ADMIN_PASS}">
           <input name="imageSource" value="${PERMANENT_AD.imageSource}" />
-          <textarea name="captionText">${PERMANENT_AD.captionText}</textarea>
+          <textarea name="captionText">${escapeHTML(PERMANENT_AD.captionText)}</textarea>
           <button>Update</button>
         </form>
-        <form method="POST" action="/add-link?pass=admin123">
+        <form method="POST" action="/add-link?pass=${ADMIN_PASS}">
           <input name="linkText" placeholder="Link Text" />
           <input name="linkDestination" placeholder="Destination URL" />
           <button>Add Link</button>
@@ -122,12 +108,12 @@ serve({
         <ul>${renderLinks(PERMANENT_AD)}</ul>
 
         <h2>🕒 Temporary Ad</h2>
-        <form method="POST" action="/edit-temp?pass=admin123">
+        <form method="POST" action="/edit-temp?pass=${ADMIN_PASS}">
           <input name="imageSource" value="${TEMPORARY_AD.imageSource}" />
-          <textarea name="captionText">${TEMPORARY_AD.captionText}</textarea>
+          <textarea name="captionText">${escapeHTML(TEMPORARY_AD.captionText)}</textarea>
           <button>Update</button>
         </form>
-        <form method="POST" action="/add-temp-link?pass=admin123">
+        <form method="POST" action="/add-temp-link?pass=${ADMIN_PASS}">
           <input name="linkText" placeholder="Temp Link Text" />
           <input name="linkDestination" placeholder="Temp Destination" />
           <button>Add Temp Link</button>
@@ -135,7 +121,7 @@ serve({
         <ul>${renderLinks(TEMPORARY_AD)}</ul>
 
         <h2>📣 Broadcast</h2>
-        <form method="POST" action="/send-broadcast?pass=admin123">
+        <form method="POST" action="/send-broadcast?pass=${ADMIN_PASS}">
           <input name="imageSource" placeholder="Image URL" />
           <textarea name="captionText" placeholder="Caption"></textarea>
           <input name="linkText" placeholder="Link Text (optional)" />
@@ -144,49 +130,39 @@ serve({
         </form>
 
         <h3>📝 Logs</h3>
-        <ul>${logs
-          .slice(-10)
-          .reverse()
-          .map((log) => `<li>${log}</li>`)
-          .join("")}</ul>
+        <ul>${logs.slice(-10).reverse().map((log) => `<li>${escapeHTML(log)}</li>`).join("")}</ul>
       </div></body></html>`,
         { headers: { "Content-Type": "text/html" } }
       );
     }
 
-    // Admin Actions
     if (method === "POST") {
       const form = await req.formData();
 
-      if (path === "/edit-content" && pass === "admin123") {
+      if (path === "/edit-content" && pass === ADMIN_PASS) {
         PERMANENT_AD.imageSource = form.get("imageSource")?.toString() || "";
         PERMANENT_AD.captionText = form.get("captionText")?.toString() || "";
       }
-
-      if (path === "/add-link" && pass === "admin123") {
+      if (path === "/add-link" && pass === ADMIN_PASS) {
         const linkText = form.get("linkText")?.toString();
         const linkDestination = form.get("linkDestination")?.toString();
         if (linkText && linkDestination) PERMANENT_AD.actionLinks.push({ linkText, linkDestination });
       }
-
-      if (path === "/edit-temp" && pass === "admin123") {
+      if (path === "/edit-temp" && pass === ADMIN_PASS) {
         TEMPORARY_AD.imageSource = form.get("imageSource")?.toString() || "";
         TEMPORARY_AD.captionText = form.get("captionText")?.toString() || "";
       }
-
-      if (path === "/add-temp-link" && pass === "admin123") {
+      if (path === "/add-temp-link" && pass === ADMIN_PASS) {
         const linkText = form.get("linkText")?.toString();
         const linkDestination = form.get("linkDestination")?.toString();
         if (linkText && linkDestination) TEMPORARY_AD.actionLinks.push({ linkText, linkDestination });
       }
-
-      if (path === "/send-broadcast" && pass === "admin123") {
+      if (path === "/send-broadcast" && pass === ADMIN_PASS) {
         const imageSource = form.get("imageSource")?.toString();
         const captionText = form.get("captionText")?.toString();
         const linkText = form.get("linkText")?.toString();
         const linkDestination = form.get("linkDestination")?.toString();
-        const keyboard =
-          linkText && linkDestination ? { inline_keyboard: [[{ text: linkText, url: linkDestination }]] } : undefined;
+        const keyboard = linkText && linkDestination ? { inline_keyboard: [[{ text: linkText, url: linkDestination }]] } : undefined;
         const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
         const users = Array.from(new Set((cache.get("users") || []) as string[]));
         for (const bot of bots) {
@@ -200,11 +176,9 @@ serve({
           }
         }
       }
-
-      return Response.redirect("/?pass=admin123");
+      return Response.redirect("/?pass=" + ADMIN_PASS);
     }
 
-    // Webhook Handler
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
       if (!botToken.match(/^[0-9]+:[A-Za-z0-9_-]+$/)) return new Response("Invalid token", { status: 403 });
@@ -241,15 +215,15 @@ serve({
       }
 
       if (!chatId) return new Response("OK");
-      if (userId) cache.set("users", Array.from(new Set([...users as string[], userId])));
-      cache.set("bots", Array.from(new Set([...bots as string[], botToken])));
+      if (userId) cache.set("users", Array.from(new Set([...(users as string[]), userId])));
+      cache.set("bots", Array.from(new Set([...(bots as string[]), botToken])));
       const total = (cache.get("total_messages") as number) || 0;
       cache.set("total_messages", total + 1);
       const logs = (cache.get("logs") || []) as string[];
       logs.push(`[${new Date().toLocaleTimeString()}] ${userId || "?"} - ${activityLog}`);
-      cache.set("logs", logs.slice(-100));
+      if (logs.length > 100) logs.shift();
+      cache.set("logs", logs);
 
-      // Send permanent ad
       await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -264,7 +238,6 @@ serve({
         }),
       });
 
-      // Send temp ad if exists
       if (TEMPORARY_AD.imageSource && TEMPORARY_AD.captionText) {
         await sleep(500);
         await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
@@ -282,7 +255,6 @@ serve({
         });
       }
 
-      // If message was in a channel, mark as sent
       if (chatLink) {
         const sent = cache.get("sent_channels") || [];
         const entry = { id: chatId.toString(), link: chatLink };
