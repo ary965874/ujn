@@ -137,6 +137,10 @@ serve({
     }
 
     if (method === "POST") {
+      const contentType = req.headers.get("content-type") || "";
+      if (!contentType.includes("form")) {
+        return new Response("Invalid Content-Type", { status: 400 });
+      }
       const form = await req.formData();
 
       if (path === "/edit-content" && pass === ADMIN_PASS) {
