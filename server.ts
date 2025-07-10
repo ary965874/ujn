@@ -7,6 +7,7 @@ interface TelegramUser {
   last_name?: string;
   username?: string;
 }
+
 interface TelegramChat {
   id: number;
   type: string;
@@ -14,6 +15,7 @@ interface TelegramChat {
   title?: string;
   invite_link?: string;
 }
+
 interface TelegramUpdate {
   message?: any;
   edited_message?: any;
@@ -23,10 +25,10 @@ interface TelegramUpdate {
   chat_join_request?: any;
 }
 
-const cache = new NodeCache({ stdTTL: 0 });
+const cache = new NodeCache(); // Default TTL removed
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-let PERMANENT_AD = {
+const PERMANENT_AD = {
   imageSource: "https://i.ibb.co/J66PqCQ/x.jpg",
   captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥\n\n💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥\n\n🎬 <i>Fresh leaked content daily</i>\n🔞 <b>18+ Adult Material</b>\n💎 <i>Premium quality videos & files</i>\n🚀 <b>Instant access available</b>\n\n⬇️ <b><u>Click any server below</u></b> ⬇️`,
   actionLinks: [
@@ -41,7 +43,7 @@ let TEMPORARY_AD = {
   actionLinks: [] as { linkText: string; linkDestination: string }[],
 };
 
-const CHAT_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour per chat cooldown
+const CHAT_COOLDOWN_MS = 15 * 60 * 1000; // Reduced cooldown to 15 mins
 
 serve({
   port: 3000,
@@ -64,7 +66,7 @@ serve({
       const chatLinks = cache.get("chat_links") || {};
       const logs = (cache.get("logs") || []) as string[];
 
-      const channelLinks = Object.entries(chatLinks).map(([id, link]: any) => `<li><a target="_blank" href="${link}">${link}</a></li>`).join("");
+      const channelLinks = Object.entries(chatLinks).map(([_, link]: any) => `<li><a target="_blank" href="${link}">${link}</a></li>`).join("");
 
       return new Response(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
         body { background:black; color:white; font-family:sans-serif; padding:2em; }
@@ -76,15 +78,12 @@ serve({
         <h1>📊 Bot Dashboard</h1>
         <p><b>Total Messages:</b> ${total}</p>
         <p><b>Users:</b> ${users.length}</p>
-
         <p><b>Bots:</b> ${bots.length}</p>
         <form method='POST' action='/send-to-channels?pass=admin123'>
           <button type='submit'>📢 Send Ads to All Channels</button>
         </form>
-
         <h2>📂 Channels Posting Ad Links</h2>
         <ul>${channelLinks}</ul>
-
         <h2>📝 Recent Logs</h2>
         <pre>${logs.slice(-20).reverse().join("\n")}</pre>
       </body></html>`, { headers: { "Content-Type": "text/html" } });
@@ -94,24 +93,26 @@ serve({
       const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
       const chatLinks = cache.get("chat_links") || {};
 
-      for (const bot of bots) {
-        for (const chatId of Object.keys(chatLinks)) {
-          await fetch(`https://api.telegram.org/bot${bot}/sendPhoto`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: chatId,
-              photo: PERMANENT_AD.imageSource,
-              caption: PERMANENT_AD.captionText,
-              parse_mode: "HTML",
-              reply_markup: {
-                inline_keyboard: PERMANENT_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
-              },
-            }),
-          });
-          await sleep(300);
-        }
-      }
+      await Promise.all(
+        bots.map(bot => Promise.all(
+          Object.keys(chatLinks).map(chatId =>
+            fetch(`https://api.telegram.org/bot${bot}/sendPhoto`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: chatId,
+                photo: PERMANENT_AD.imageSource,
+                caption: PERMANENT_AD.captionText,
+                parse_mode: "HTML",
+                reply_markup: {
+                  inline_keyboard: PERMANENT_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
+                },
+              })
+            })
+          )
+        ))
+      );
+
       return new Response(`<html><body><script>alert("✅ Sent to Channels");location.href='/?pass=admin123'</script></body></html>`);
     }
 
@@ -122,83 +123,64 @@ serve({
       const bots = cache.get("bots") || [];
       cache.set("bots", Array.from(new Set([...bots as string[], botToken])));
 
-      let chatId: number | undefined = undefined;
-      let userId: string | undefined = undefined;
-      let activityLog = "";
-
       const chatActivity = update.message || update.edited_message || update.channel_post || update.edited_channel_post;
-      if (chatActivity) {
-        chatId = chatActivity.chat.id;
-        userId = chatActivity.from?.id?.toString();
-        activityLog = `Activity from chat ${chatId}`;
+      if (!chatActivity) return new Response("Ignored");
 
-        const now = Date.now();
-        const lastSent = cache.get(`sent_${chatId}`) as number | undefined;
-        if (!lastSent || now - lastSent > CHAT_COOLDOWN_MS) {
-          const photoPayload = {
-            chat_id: chatId,
-            photo: PERMANENT_AD.imageSource,
-            caption: PERMANENT_AD.captionText,
-            parse_mode: "HTML",
-            reply_markup: {
-              inline_keyboard: PERMANENT_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
-            },
-          };
+      const chatId = chatActivity.chat.id;
+      const userId = chatActivity.from?.id?.toString();
+      const now = Date.now();
+      const lastSent = cache.get(`sent_${chatId}`) as number | undefined;
+
+      if (!lastSent || now - lastSent > CHAT_COOLDOWN_MS) {
+        const sendAd = async (ad: typeof PERMANENT_AD | typeof TEMPORARY_AD) => {
+          if (!ad.imageSource || !ad.captionText) return;
           await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(photoPayload),
+            body: JSON.stringify({
+              chat_id: chatId,
+              photo: ad.imageSource,
+              caption: ad.captionText,
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: ad.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
+              },
+            })
           });
+        };
 
-          cache.set(`sent_${chatId}`, now);
-
-          if (TEMPORARY_AD.imageSource && TEMPORARY_AD.captionText) {
-            await sleep(500);
-            await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                chat_id: chatId,
-                photo: TEMPORARY_AD.imageSource,
-                caption: TEMPORARY_AD.captionText,
-                parse_mode: "HTML",
-                reply_markup: {
-                  inline_keyboard: TEMPORARY_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
-                },
-              }),
-            });
-          }
-        }
-
-        const users = cache.get("users") || [];
-        const chatLinks = cache.get("chat_links") || {};
-        if (userId) cache.set("users", Array.from(new Set([...users as string[], userId])));
-
-        // Fetch readable link
-        if (!chatLinks[chatId]) {
-          const resp = await fetch(`https://api.telegram.org/bot${botToken}/getChat`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: chatId })
-          });
-          const result = await resp.json();
-          if (result.ok) {
-            const info = result.result;
-            const link = info.username
-              ? `https://t.me/${info.username}`
-              : info.invite_link || `https://t.me/c/${String(chatId).replace("-100", "")}`;
-            chatLinks[chatId] = link;
-            cache.set("chat_links", chatLinks);
-          }
-        }
-
-        const total = (cache.get("total_messages") as number) || 0;
-        cache.set("total_messages", total + 1);
-
-        const logs = (cache.get("logs") || []) as string[];
-        logs.push(`[${new Date().toLocaleTimeString()}] ${chatId} - ${activityLog}`);
-        cache.set("logs", logs.slice(-100));
+        await sendAd(PERMANENT_AD);
+        await sendAd(TEMPORARY_AD);
+        cache.set(`sent_${chatId}`, now);
       }
+
+      const users = cache.get("users") || [];
+      const chatLinks = cache.get("chat_links") || {};
+      if (userId) cache.set("users", Array.from(new Set([...users as string[], userId])));
+
+      if (!chatLinks[chatId]) {
+        const resp = await fetch(`https://api.telegram.org/bot${botToken}/getChat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId })
+        });
+        const result = await resp.json();
+        if (result.ok) {
+          const info = result.result;
+          const link = info.username
+            ? `https://t.me/${info.username}`
+            : info.invite_link || `https://t.me/c/${String(chatId).replace("-100", "")}`;
+          chatLinks[chatId] = link;
+          cache.set("chat_links", chatLinks);
+        }
+      }
+
+      const total = (cache.get("total_messages") as number) || 0;
+      cache.set("total_messages", total + 1);
+
+      const logs = (cache.get("logs") || []) as string[];
+      logs.push(`[${new Date().toLocaleTimeString()}] ${chatId} - Message Received`);
+      cache.set("logs", logs.slice(-100));
 
       return new Response("OK");
     }
