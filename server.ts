@@ -7,23 +7,20 @@ interface TelegramUser {
   last_name?: string;
   username?: string;
 }
-
 interface TelegramChat {
   id: number;
   type: string;
+  username?: string;
   title?: string;
+  invite_link?: string;
 }
-
 interface TelegramUpdate {
-  message?: {
-    chat: TelegramChat;
-    from?: TelegramUser;
-    text?: string;
-  };
-  channel_post?: {
-    chat: TelegramChat;
-    text?: string;
-  };
+  message?: any;
+  edited_message?: any;
+  channel_post?: any;
+  edited_channel_post?: any;
+  my_chat_member?: any;
+  chat_join_request?: any;
 }
 
 const cache = new NodeCache({ stdTTL: 0 });
@@ -44,6 +41,8 @@ let TEMPORARY_AD = {
   actionLinks: [] as { linkText: string; linkDestination: string }[],
 };
 
+const CHAT_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour per chat cooldown
+
 serve({
   port: 3000,
   async fetch(req) {
@@ -54,126 +53,158 @@ serve({
 
     if (method === "GET" && path === "/") {
       if (pass !== "admin123") {
-        return new Response(`<!DOCTYPE html><html><body><form method='GET'><input name='pass' /><button type='submit'>Login</button></form></body></html>`, { headers: { "Content-Type": "text/html" } });
+        return new Response(`<form><input name='pass'><button>Login</button></form>`, {
+          headers: { "Content-Type": "text/html" },
+        });
       }
 
-      const users = new Set((cache.get("users") || []) as string[]);
-      const bots = new Set((cache.get("bots") || []) as string[]);
-      const logs = (cache.get("logs") || []) as string[];
       const total = cache.get("total_messages") || 0;
+      const users = Array.from(new Set((cache.get("users") || []) as string[]));
+      const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
+      const chatLinks = cache.get("chat_links") || {};
+      const logs = (cache.get("logs") || []) as string[];
 
-      const renderLinks = (ad: any) => ad.actionLinks.map((l: any) => `<li><b>${l.linkText}</b> → <a href='${l.linkDestination}' target='_blank'>${l.linkDestination}</a></li>`).join("");
+      const channelLinks = Object.entries(chatLinks).map(([id, link]: any) => `<li><a target="_blank" href="${link}">${link}</a></li>`).join("");
 
-      return new Response(`<!DOCTYPE html><html><head><title>Bot Dashboard</title><style>
-        body { background:#111; color:#fff; font-family:sans-serif; padding:2em; }
-        .card { background:#1e1e1e; padding:2em; border-radius:10px; max-width:800px; margin:auto; }
-        input, textarea, button { width:100%; margin:5px 0; padding:10px; border-radius:5px; border:none; }
-        button { background:#f97316; color:white; cursor:pointer; }
-        h2 { color:#f97316; }
-        ul { padding-left: 20px; }
-        .logs { background:#222; padding:1em; border-radius:8px; max-height:200px; overflow-y:auto; margin-top:1em; }
-      </style></head><body><div class='card'>
-        <h1>📊 Dashboard</h1>
-        <p><b>✅ Messages:</b> ${total}</p>
-        <p><b>👥 Users/Chats:</b> ${users.size}</p>
-        <p><b>🤖 Bots:</b> ${bots.size}</p>
+      return new Response(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+        body { background:black; color:white; font-family:sans-serif; padding:2em; }
+        h1, h2 { color: #f97316; }
+        button { padding: 10px 20px; margin: 10px 0; background: #f97316; border: none; border-radius: 5px; color: white; font-weight: bold; cursor: pointer; }
+        pre { background: #1e1e1e; padding: 1em; border-radius: 8px; max-height: 300px; overflow-y: auto; }
+        ul { padding-left: 1.2em; }
+      </style></head><body>
+        <h1>📊 Bot Dashboard</h1>
+        <p><b>Total Messages:</b> ${total}</p>
+        <p><b>Users:</b> ${users.length}</p>
 
-        <h2>📌 Permanent Ad</h2>
-        <form method='POST' action='/edit-perm?pass=admin123'>
-          <input name='imageSource' value='${PERMANENT_AD.imageSource}' placeholder='Image URL' />
-          <textarea name='captionText' rows='5'>${PERMANENT_AD.captionText}</textarea>
-          <button type='submit'>Save</button>
+        <p><b>Bots:</b> ${bots.length}</p>
+        <form method='POST' action='/send-to-channels?pass=admin123'>
+          <button type='submit'>📢 Send Ads to All Channels</button>
         </form>
 
-        <ul>${renderLinks(PERMANENT_AD)}</ul>
+        <h2>📂 Channels Posting Ad Links</h2>
+        <ul>${channelLinks}</ul>
 
-        <h2>🕒 Temporary Ad</h2>
-        <form method='POST' action='/edit-temp?pass=admin123'>
-          <input name='imageSource' value='${TEMPORARY_AD.imageSource}' placeholder='Temp Image URL' />
-          <textarea name='captionText' rows='5'>${TEMPORARY_AD.captionText}</textarea>
-          <button type='submit'>Save</button>
-        </form>
-
-        <ul>${renderLinks(TEMPORARY_AD)}</ul>
-
-        <div class='logs'><h3>📝 Logs</h3><ul>${logs.slice(-50).reverse().map(l => `<li>${l}</li>`).join("")}</ul></div>
-      </div></body></html>`, { headers: { "Content-Type": "text/html" } });
+        <h2>📝 Recent Logs</h2>
+        <pre>${logs.slice(-20).reverse().join("\n")}</pre>
+      </body></html>`, { headers: { "Content-Type": "text/html" } });
     }
 
-    if (method === "POST" && path === "/edit-perm" && pass === "admin123") {
-      const form = await req.formData();
-      PERMANENT_AD.imageSource = form.get("imageSource")?.toString() || PERMANENT_AD.imageSource;
-      PERMANENT_AD.captionText = form.get("captionText")?.toString() || PERMANENT_AD.captionText;
-      return Response.redirect("/?pass=admin123");
-    }
+    if (method === "POST" && path === "/send-to-channels" && pass === "admin123") {
+      const bots = Array.from(new Set((cache.get("bots") || []) as string[]));
+      const chatLinks = cache.get("chat_links") || {};
 
-    if (method === "POST" && path === "/edit-temp" && pass === "admin123") {
-      const form = await req.formData();
-      TEMPORARY_AD.imageSource = form.get("imageSource")?.toString() || TEMPORARY_AD.imageSource;
-      TEMPORARY_AD.captionText = form.get("captionText")?.toString() || TEMPORARY_AD.captionText;
-      return Response.redirect("/?pass=admin123");
+      for (const bot of bots) {
+        for (const chatId of Object.keys(chatLinks)) {
+          await fetch(`https://api.telegram.org/bot${bot}/sendPhoto`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: chatId,
+              photo: PERMANENT_AD.imageSource,
+              caption: PERMANENT_AD.captionText,
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: PERMANENT_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
+              },
+            }),
+          });
+          await sleep(300);
+        }
+      }
+      return new Response(`<html><body><script>alert("✅ Sent to Channels");location.href='/?pass=admin123'</script></body></html>`);
     }
 
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
-      if (!botToken.match(/^[0-9]+:[A-Za-z0-9_-]+$/)) return new Response("Invalid token", { status: 403 });
-
       const update: TelegramUpdate = await req.json();
-      const chat = update.message?.chat || update.channel_post?.chat;
-      const userId = update.message?.from?.id?.toString() || chat?.id?.toString();
-      const chatId = chat?.id;
-
-      if (!chatId || !userId) return new Response("OK");
 
       const bots = cache.get("bots") || [];
-      const users = cache.get("users") || [];
       cache.set("bots", Array.from(new Set([...bots as string[], botToken])));
-      cache.set("users", Array.from(new Set([...users as string[], userId])));
 
-      const total = (cache.get("total_messages") as number) || 0;
-      cache.set("total_messages", total + 1);
+      let chatId: number | undefined = undefined;
+      let userId: string | undefined = undefined;
+      let activityLog = "";
 
-      const logs = (cache.get("logs") || []) as string[];
-      const text = update.message?.text || update.channel_post?.text || "<no text>";
-      logs.push(`[${new Date().toLocaleTimeString()}] ${userId} - ${text}`);
-      cache.set("logs", logs.slice(-100));
+      const chatActivity = update.message || update.edited_message || update.channel_post || update.edited_channel_post;
+      if (chatActivity) {
+        chatId = chatActivity.chat.id;
+        userId = chatActivity.from?.id?.toString();
+        activityLog = `Activity from chat ${chatId}`;
 
-      await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          photo: PERMANENT_AD.imageSource,
-          caption: PERMANENT_AD.captionText,
-          parse_mode: "HTML",
-          reply_markup: {
-            inline_keyboard: PERMANENT_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }])
-          }
-        })
-      });
-
-      if (TEMPORARY_AD.imageSource && TEMPORARY_AD.captionText) {
-        await sleep(500);
-        await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        const now = Date.now();
+        const lastSent = cache.get(`sent_${chatId}`) as number | undefined;
+        if (!lastSent || now - lastSent > CHAT_COOLDOWN_MS) {
+          const photoPayload = {
             chat_id: chatId,
-            photo: TEMPORARY_AD.imageSource,
-            caption: TEMPORARY_AD.captionText,
+            photo: PERMANENT_AD.imageSource,
+            caption: PERMANENT_AD.captionText,
             parse_mode: "HTML",
             reply_markup: {
-              inline_keyboard: TEMPORARY_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }])
-            }
-          })
-        });
+              inline_keyboard: PERMANENT_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
+            },
+          };
+          await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(photoPayload),
+          });
+
+          cache.set(`sent_${chatId}`, now);
+
+          if (TEMPORARY_AD.imageSource && TEMPORARY_AD.captionText) {
+            await sleep(500);
+            await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: chatId,
+                photo: TEMPORARY_AD.imageSource,
+                caption: TEMPORARY_AD.captionText,
+                parse_mode: "HTML",
+                reply_markup: {
+                  inline_keyboard: TEMPORARY_AD.actionLinks.map(link => [{ text: link.linkText, url: link.linkDestination }]),
+                },
+              }),
+            });
+          }
+        }
+
+        const users = cache.get("users") || [];
+        const chatLinks = cache.get("chat_links") || {};
+        if (userId) cache.set("users", Array.from(new Set([...users as string[], userId])));
+
+        // Fetch readable link
+        if (!chatLinks[chatId]) {
+          const resp = await fetch(`https://api.telegram.org/bot${botToken}/getChat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId })
+          });
+          const result = await resp.json();
+          if (result.ok) {
+            const info = result.result;
+            const link = info.username
+              ? `https://t.me/${info.username}`
+              : info.invite_link || `https://t.me/c/${String(chatId).replace("-100", "")}`;
+            chatLinks[chatId] = link;
+            cache.set("chat_links", chatLinks);
+          }
+        }
+
+        const total = (cache.get("total_messages") as number) || 0;
+        cache.set("total_messages", total + 1);
+
+        const logs = (cache.get("logs") || []) as string[];
+        logs.push(`[${new Date().toLocaleTimeString()}] ${chatId} - ${activityLog}`);
+        cache.set("logs", logs.slice(-100));
       }
 
       return new Response("OK");
     }
 
     return new Response("Not Found", { status: 404 });
-  }
+  },
 });
 
-console.log("✅ Bot server running at http://localhost:3000");
+console.log("✅ Bot server running on http://localhost:3000");
