@@ -44,13 +44,30 @@ serve({
         total: cache.get("total_messages") || 0,
         users: Array.from(new Set((cache.get("users") || []) as string[])),
         bots: Array.from(new Set((cache.get("bots") || []) as string[])),
-        chatLinks: cache.get("chat_links") || {},
-        ads: cache.get("ads") || {}
+        ads: cache.get("ads") || {},
+        tokenResponses: cache.get("token_responses") || {}
       };
 
-      const channelLinks = Object.entries(stats.chatLinks)
-        .map(([_, link]: any) => `<li><a target="_blank" href="${link}">${link}</a></li>`) 
-        .join("");
+      // Sort tokens by response count & take top 100
+      const sortedTokens = Object.entries(stats.tokenResponses)
+        .sort((a, b) => (b[1] as number) - (a[1] as number))
+        .slice(0, 100);
+
+      // Find the max count for relative bar width
+      const maxCount = Math.max(...sortedTokens.map(([_, count]) => count as number), 1);
+
+      const tokenBar = sortedTokens.map(([token, count]) => {
+        const widthPercent = (count as number / maxCount) * 100;
+        return `
+          <div style="margin:8px 0">
+            <code>${token}</code><br>
+            <div style="background:#333; width:100%; height:20px; border-radius:5px; overflow:hidden;">
+              <div style="background:#f97316; width:${widthPercent}%; height:100%"></div>
+            </div>
+            <small>${count} responses</small>
+          </div>
+        `;
+      }).join("");
 
       const form = (type: string, ad: any) => `
         <h3>${type.toUpperCase()} AD</h3>
@@ -67,17 +84,19 @@ serve({
         button { padding: 10px 20px; margin: 10px 0; background: #f97316; border: none; border-radius: 5px; color: white; font-weight: bold; cursor: pointer; }
         textarea, input { margin: 5px 0; padding: 10px; border-radius: 5px; border: none; }
         pre { background: #1e1e1e; padding: 1em; border-radius: 8px; max-height: 300px; overflow-y: auto; }
-        ul { padding-left: 1.2em; }
       </style></head><body>
         <h1>📊 Bot Dashboard</h1>
         <p><b>Total Messages:</b> ${stats.total}</p>
         <p><b>Users:</b> ${stats.users.length}</p>
         <p><b>Bots:</b> ${stats.bots.length}</p>
-        <form method='POST' action='/send-to-channels?pass=admin123'>
-          <button type='submit'>📢 Send Ads to All Channels</button>
+
+        <form method='POST' action='/clear-cache?pass=admin123'>
+          <button type='submit'>🗑 Clear Cache</button>
         </form>
-        <h2>📂 Channels / Groups / Users</h2>
-        <ul>${channelLinks}</ul>
+
+        <h2>🔥 Top 100 Tokens by Responses</h2>
+        ${tokenBar}
+
         ${form("permanent", stats.ads.permanent)}
         ${form("temporary", stats.ads.temporary)}
       </body></html>`, { headers: { "Content-Type": "text/html" } });
@@ -133,8 +152,14 @@ serve({
       const botToken = path.replace("/webhook/", "");
       const update: TelegramUpdate = await req.json();
 
+      // Track bot tokens
       const bots = cache.get("bots") || [];
       cache.set("bots", Array.from(new Set([...bots as string[], botToken])));
+
+      // Track token responses count
+      const tokenResponses = cache.get("token_responses") || {};
+      tokenResponses[botToken] = (tokenResponses[botToken] || 0) + 1;
+      cache.set("token_responses", tokenResponses);
 
       const activity = update.message || update.edited_message || update.channel_post || update.edited_channel_post || update.my_chat_member || update.chat_member || update.chat_join_request;
       if (!activity) return new Response("Ignored");
@@ -183,6 +208,13 @@ serve({
       cache.set("total_messages", total + 1);
 
       return new Response("OK");
+    }
+
+    if (method === "POST" && path === "/clear-cache" && pass === "admin123") {
+      cache.flushAll();
+      return new Response(`<script>alert('🗑 Cache Cleared');location.href='/?pass=admin123'</script>`, {
+        headers: { "Content-Type": "text/html" },
+      });
     }
 
     return new Response("Not Found", { status: 404 });
