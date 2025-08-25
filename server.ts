@@ -56,15 +56,16 @@ serve({
       // Find the max count for relative bar width
       const maxCount = Math.max(...sortedTokens.map(([_, count]) => count as number), 1);
 
+      // Render tokens clearly with wrapping and labels for visibility
       const tokenBar = sortedTokens.map(([token, count]) => {
         const widthPercent = (count as number / maxCount) * 100;
         return `
-          <div style="margin:8px 0">
-            <code>${token}</code><br>
+          <div style="margin:12px 0; padding: 6px; background:#1a1a1a; border-radius: 6px;">
+            <div style="font-family: monospace; word-break: break-all; color:#f97316; margin-bottom: 4px;">Token: ${token}</div>
             <div style="background:#333; width:100%; height:20px; border-radius:5px; overflow:hidden;">
               <div style="background:#f97316; width:${widthPercent}%; height:100%"></div>
             </div>
-            <small>${count} responses</small>
+            <div style="color:#ccc; margin-top: 4px;">Responses: <b>${count}</b></div>
           </div>
         `;
       }).join("");
