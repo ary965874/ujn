@@ -45,7 +45,10 @@ serve({
         users: Array.from(new Set((cache.get("users") || []) as string[])),
         bots: Array.from(new Set((cache.get("bots") || []) as string[])),
         ads: cache.get("ads") || {},
-        tokenResponses: cache.get("token_responses") || {}
+        tokenResponses: (() => {
+          const raw = cache.get("token_responses") as string | undefined;
+          return raw ? JSON.parse(raw) : {};
+        })()
       };
 
       // Sort tokens by response count & take top 100
@@ -53,10 +56,8 @@ serve({
         .sort((a, b) => (b[1] as number) - (a[1] as number))
         .slice(0, 100);
 
-      // Find the max count for relative bar width
       const maxCount = Math.max(...sortedTokens.map(([_, count]) => count as number), 1);
 
-      // Render tokens clearly with wrapping and labels for visibility
       const tokenBar = sortedTokens.map(([token, count]) => {
         const widthPercent = (count as number / maxCount) * 100;
         return `
@@ -157,10 +158,11 @@ serve({
       const bots = cache.get("bots") || [];
       cache.set("bots", Array.from(new Set([...bots as string[], botToken])));
 
-      // Track token responses count
-      const tokenResponses = cache.get("token_responses") || {};
+      // Track token responses count with JSON serialization to cache
+      const tokenResponsesRaw = cache.get("token_responses") as string | undefined;
+      const tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {};
       tokenResponses[botToken] = (tokenResponses[botToken] || 0) + 1;
-      cache.set("token_responses", tokenResponses);
+      cache.set("token_responses", JSON.stringify(tokenResponses));
 
       const activity = update.message || update.edited_message || update.channel_post || update.edited_channel_post || update.my_chat_member || update.chat_member || update.chat_join_request;
       if (!activity) return new Response("Ignored");
