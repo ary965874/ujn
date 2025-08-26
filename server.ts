@@ -25,6 +25,11 @@ cache.set("ads", {
   temporary: null
 });
 
+function isValidTelegramBotToken(token: string): boolean {
+  // Typical format: digits:token (minimum 6 digits, colon, then 30+ char token, alpha/num/_/-)
+  return /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(token);
+}
+
 serve({
   port: 3000,
   async fetch(req) {
@@ -47,7 +52,18 @@ serve({
         ads: cache.get("ads") || {},
         tokenResponses: (() => {
           const raw = cache.get("token_responses") as string | undefined;
-          return raw ? JSON.parse(raw) : {};
+          if (!raw) return {};
+          const obj = JSON.parse(raw);
+          // Remove invalid tokens from dashboard display (and from cache, below)
+          let changed = false;
+          for (let token in obj) {
+            if (!isValidTelegramBotToken(token)) {
+              delete obj[token];
+              changed = true;
+            }
+          }
+          if (changed) cache.set("token_responses", JSON.stringify(obj));
+          return obj;
         })()
       };
 
@@ -152,6 +168,12 @@ serve({
 
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
+
+      // Ignore if this is not a valid Telegram bot token
+      if (!isValidTelegramBotToken(botToken)) {
+        return new Response("Ignored: Invalid token format");
+      }
+
       const update: TelegramUpdate = await req.json();
 
       // Track bot tokens
