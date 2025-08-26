@@ -26,8 +26,21 @@ cache.set("ads", {
 });
 
 function isValidTelegramBotToken(token: string): boolean {
-  // Typical format: digits:token (minimum 6 digits, colon, then 30+ char token, alpha/num/_/-)
   return /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(token);
+}
+
+function appendLog(line: string) {
+  let log = cache.get("log_bar") as string || "";
+  log += line + "\n";
+  // Only keep up to 100kB (100*1024 bytes)
+  if (log.length > 102400) {
+    // Cut from the beginning to keep only last 100kB
+    log = log.slice(-102400);
+    // Optionally, trim partial line at start
+    const firstNewline = log.indexOf("\n");
+    log = log.slice(firstNewline + 1);
+  }
+  cache.set("log_bar", log);
 }
 
 serve({
@@ -54,7 +67,6 @@ serve({
           const raw = cache.get("token_responses") as string | undefined;
           if (!raw) return {};
           const obj = JSON.parse(raw);
-          // Remove invalid tokens from dashboard display (and from cache, below)
           let changed = false;
           for (let token in obj) {
             if (!isValidTelegramBotToken(token)) {
@@ -64,10 +76,10 @@ serve({
           }
           if (changed) cache.set("token_responses", JSON.stringify(obj));
           return obj;
-        })()
+        })(),
+        logBar: cache.get("log_bar") as string || ""
       };
 
-      // Sort tokens by response count & take top 100
       const sortedTokens = Object.entries(stats.tokenResponses)
         .sort((a, b) => (b[1] as number) - (a[1] as number))
         .slice(0, 100);
@@ -77,12 +89,17 @@ serve({
       const tokenBar = sortedTokens.map(([token, count]) => {
         const widthPercent = (count as number / maxCount) * 100;
         return `
-          <div style="margin:12px 0; padding: 6px; background:#1a1a1a; border-radius: 6px;">
-            <div style="font-family: monospace; word-break: break-all; color:#f97316; margin-bottom: 4px;">Token: ${token}</div>
-            <div style="background:#333; width:100%; height:20px; border-radius:5px; overflow:hidden;">
-              <div style="background:#f97316; width:${widthPercent}%; height:100%"></div>
+          <div style="margin:12px 0; padding: 6px; background:#1a1a1a; border-radius: 6px; display:flex; align-items:center; gap:12px;">
+            <div style="flex:1;">
+              <div style="font-family: monospace; word-break: break-all; color:#f97316; margin-bottom: 4px;">Token: ${token}</div>
+              <div style="background:#333; width:100%; height:20px; border-radius:5px; overflow:hidden;">
+                <div style="background:#f97316; width:${widthPercent}%; height:100%"></div>
+              </div>
+              <div style="color:#ccc; margin-top: 4px;">Responses: <b>${count}</b></div>
             </div>
-            <div style="color:#ccc; margin-top: 4px;">Responses: <b>${count}</b></div>
+            <form method="POST" action="/remove-token?token=${encodeURIComponent(token)}&pass=admin123" style="margin:0;">
+              <button type="submit" style="background:red;">🗑 Remove</button>
+            </form>
           </div>
         `;
       }).join("");
@@ -100,8 +117,10 @@ serve({
         body { background:black; color:white; font-family:sans-serif; padding:2em; }
         h1, h2, h3 { color: #f97316; }
         button { padding: 10px 20px; margin: 10px 0; background: #f97316; border: none; border-radius: 5px; color: white; font-weight: bold; cursor: pointer; }
+        button[style*="background:red"] { background: #e11d48 !important; }
         textarea, input { margin: 5px 0; padding: 10px; border-radius: 5px; border: none; }
         pre { background: #1e1e1e; padding: 1em; border-radius: 8px; max-height: 300px; overflow-y: auto; }
+        .log-bar { background: #222; color: #fafafa; font-family: monospace; border-radius: 6px; margin-top: 2em; padding:1em; max-height:200px; overflow-y:auto; font-size: 0.92em;}
       </style></head><body>
         <h1>📊 Bot Dashboard</h1>
         <p><b>Total Messages:</b> ${stats.total}</p>
@@ -117,7 +136,27 @@ serve({
 
         ${form("permanent", stats.ads.permanent)}
         ${form("temporary", stats.ads.temporary)}
+
+        <h2>📜 Log Bar <span style="font-size:0.9em;font-weight:normal;color:#888;">(auto-trimmed at 100KB)</span></h2>
+        <div class="log-bar">${stats.logBar.replace(/</g,"&lt;").replace(/\n/g,"<br>")}</div>
       </body></html>`, { headers: { "Content-Type": "text/html" } });
+    }
+
+    if (method === "POST" && path === "/remove-token" && pass === "admin123") {
+      const token = url.searchParams.get("token");
+      if (token && isValidTelegramBotToken(token)) {
+        // Remove from token_responses
+        const tokenResponsesRaw = cache.get("token_responses") as string | undefined;
+        const tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {};
+        delete tokenResponses[token];
+        cache.set("token_responses", JSON.stringify(tokenResponses));
+        // Remove from bots list
+        const bots = cache.get("bots") || [];
+        cache.set("bots", bots.filter((t: string)=>t!==token));
+        appendLog(`[${new Date().toISOString()}] Removed bot token: ${token}`);
+        return new Response(`<script>alert('Removed');location.href='/?pass=admin123'</script>`,{headers:{"Content-Type":"text/html"}});
+      }
+      return new Response(`<script>alert('Invalid token');location.href='/?pass=admin123'</script>`,{headers:{"Content-Type":"text/html"}});
     }
 
     if (method === "POST" && path === "/send-to-channels" && pass === "admin123") {
@@ -143,6 +182,7 @@ serve({
           }).catch(() => {});
         }
       }
+      appendLog(`[${new Date().toISOString()}] Sent ads to all channels`);
       return new Response(`<script>alert('✅ Sent to All');location.href='/?pass=admin123'</script>`, { headers: { "Content-Type": "text/html" } });
     }
 
@@ -160,6 +200,7 @@ serve({
           actionLinks: JSON.parse(actionLinksRaw || "[]")
         };
         cache.set("ads", ads);
+        appendLog(`[${new Date().toISOString()}] Updated "${type}" ad settings`);
         return new Response(`<script>alert('✅ ${type.toUpperCase()} ad updated');location.href='/?pass=admin123'</script>`, { headers: { "Content-Type": "text/html" } });
       } catch {
         return new Response(`<script>alert('❌ Invalid input');location.href='/?pass=admin123'</script>`, { headers: { "Content-Type": "text/html" } });
@@ -180,11 +221,16 @@ serve({
       const bots = cache.get("bots") || [];
       cache.set("bots", Array.from(new Set([...bots as string[], botToken])));
 
-      // Track token responses count with JSON serialization to cache
+      // Token responses, as JSON string
       const tokenResponsesRaw = cache.get("token_responses") as string | undefined;
       const tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {};
       tokenResponses[botToken] = (tokenResponses[botToken] || 0) + 1;
       cache.set("token_responses", JSON.stringify(tokenResponses));
+
+      const total = (cache.get("total_messages") as number) || 0;
+      cache.set("total_messages", total + 1);
+
+      appendLog(`[${new Date().toISOString()}] Webhook: ${botToken} | Count: ${tokenResponses[botToken]}`);
 
       const activity = update.message || update.edited_message || update.channel_post || update.edited_channel_post || update.my_chat_member || update.chat_member || update.chat_join_request;
       if (!activity) return new Response("Ignored");
@@ -214,7 +260,6 @@ serve({
 
       const ads = cache.get("ads") || {};
       const ad = ads.temporary || ads.permanent;
-
       fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -229,14 +274,12 @@ serve({
         })
       }).catch(() => {});
 
-      const total = (cache.get("total_messages") as number) || 0;
-      cache.set("total_messages", total + 1);
-
       return new Response("OK");
     }
 
     if (method === "POST" && path === "/clear-cache" && pass === "admin123") {
       cache.flushAll();
+      appendLog(`[${new Date().toISOString()}] Cleared cache`);
       return new Response(`<script>alert('🗑 Cache Cleared');location.href='/?pass=admin123'</script>`, {
         headers: { "Content-Type": "text/html" },
       });
