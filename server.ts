@@ -31,12 +31,10 @@ function isValidTelegramBotToken(token: string): boolean {
 
 function appendLog(line: string) {
   let log = cache.get("log_bar") as string || "";
-  log += line + "\n";
-  // Only keep up to 100kB (100*1024 bytes)
-  if (log.length > 102400) {
-    // Cut from the beginning to keep only last 100kB
+  // Always keep older to newer
+  log += `${new Date().toISOString()} | ${line}\n`;
+  if (log.length > 102400) { // 100KB
     log = log.slice(-102400);
-    // Optionally, trim partial line at start
     const firstNewline = log.indexOf("\n");
     log = log.slice(firstNewline + 1);
   }
@@ -51,6 +49,7 @@ serve({
     const method = req.method;
     const pass = url.searchParams.get("pass");
 
+    // Dashboard
     if (method === "GET" && path === "/") {
       if (pass !== "admin123") {
         return new Response(`<form><input name='pass'><button>Login</button></form>`, {
@@ -58,25 +57,25 @@ serve({
         });
       }
 
+      // Parse data & clean irrelevant tokens
+      const tokenResponsesRaw = cache.get("token_responses") as string | undefined;
+      let tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {};
+      let changed = false;
+      for (let token in tokenResponses) {
+        if (!isValidTelegramBotToken(token)) {
+          delete tokenResponses[token];
+          changed = true;
+        }
+      }
+      if (changed) cache.set("token_responses", JSON.stringify(tokenResponses));
+
+      // Build dashboard data
       const stats = {
         total: cache.get("total_messages") || 0,
         users: Array.from(new Set((cache.get("users") || []) as string[])),
         bots: Array.from(new Set((cache.get("bots") || []) as string[])),
         ads: cache.get("ads") || {},
-        tokenResponses: (() => {
-          const raw = cache.get("token_responses") as string | undefined;
-          if (!raw) return {};
-          const obj = JSON.parse(raw);
-          let changed = false;
-          for (let token in obj) {
-            if (!isValidTelegramBotToken(token)) {
-              delete obj[token];
-              changed = true;
-            }
-          }
-          if (changed) cache.set("token_responses", JSON.stringify(obj));
-          return obj;
-        })(),
+        tokenResponses,
         logBar: cache.get("log_bar") as string || ""
       };
 
@@ -89,7 +88,7 @@ serve({
       const tokenBar = sortedTokens.map(([token, count]) => {
         const widthPercent = (count as number / maxCount) * 100;
         return `
-          <div style="margin:12px 0; padding: 6px; background:#1a1a1a; border-radius: 6px; display:flex; align-items:center; gap:12px;">
+          <div style="margin:12px 0; padding: 6px; background:#1a1a1a; border-radius: 6px; display: flex; align-items: center;">
             <div style="flex:1;">
               <div style="font-family: monospace; word-break: break-all; color:#f97316; margin-bottom: 4px;">Token: ${token}</div>
               <div style="background:#333; width:100%; height:20px; border-radius:5px; overflow:hidden;">
@@ -97,8 +96,8 @@ serve({
               </div>
               <div style="color:#ccc; margin-top: 4px;">Responses: <b>${count}</b></div>
             </div>
-            <form method="POST" action="/remove-token?token=${encodeURIComponent(token)}&pass=admin123" style="margin:0;">
-              <button type="submit" style="background:red;">🗑 Remove</button>
+            <form method="POST" action="/remove-token?token=${encodeURIComponent(token)}&pass=admin123" style="margin:0 0 0 20px;">
+              <button type="submit" style="background:#e11d48;">🗑 Delete</button>
             </form>
           </div>
         `;
@@ -117,10 +116,10 @@ serve({
         body { background:black; color:white; font-family:sans-serif; padding:2em; }
         h1, h2, h3 { color: #f97316; }
         button { padding: 10px 20px; margin: 10px 0; background: #f97316; border: none; border-radius: 5px; color: white; font-weight: bold; cursor: pointer; }
-        button[style*="background:red"] { background: #e11d48 !important; }
+        button[style*="background:#e11d48"] { background: #e11d48 !important; }
         textarea, input { margin: 5px 0; padding: 10px; border-radius: 5px; border: none; }
         pre { background: #1e1e1e; padding: 1em; border-radius: 8px; max-height: 300px; overflow-y: auto; }
-        .log-bar { background: #222; color: #fafafa; font-family: monospace; border-radius: 6px; margin-top: 2em; padding:1em; max-height:200px; overflow-y:auto; font-size: 0.92em;}
+        .log-bar { background: #222; color: #fafafa; font-family: monospace; border-radius: 6px; margin-top: 2em; padding:1em; max-height:200px; overflow-y:auto; font-size: 0.95em;}
       </style></head><body>
         <h1>📊 Bot Dashboard</h1>
         <p><b>Total Messages:</b> ${stats.total}</p>
@@ -142,18 +141,19 @@ serve({
       </body></html>`, { headers: { "Content-Type": "text/html" } });
     }
 
+    // Delete a token/webhook
     if (method === "POST" && path === "/remove-token" && pass === "admin123") {
       const token = url.searchParams.get("token");
       if (token && isValidTelegramBotToken(token)) {
         // Remove from token_responses
         const tokenResponsesRaw = cache.get("token_responses") as string | undefined;
-        const tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {};
+        let tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {};
         delete tokenResponses[token];
         cache.set("token_responses", JSON.stringify(tokenResponses));
         // Remove from bots list
         const bots = cache.get("bots") || [];
         cache.set("bots", bots.filter((t: string)=>t!==token));
-        appendLog(`[${new Date().toISOString()}] Removed bot token: ${token}`);
+        appendLog(`Removed token: ${token}`);
         return new Response(`<script>alert('Removed');location.href='/?pass=admin123'</script>`,{headers:{"Content-Type":"text/html"}});
       }
       return new Response(`<script>alert('Invalid token');location.href='/?pass=admin123'</script>`,{headers:{"Content-Type":"text/html"}});
@@ -182,7 +182,7 @@ serve({
           }).catch(() => {});
         }
       }
-      appendLog(`[${new Date().toISOString()}] Sent ads to all channels`);
+      appendLog(`Sent ads to all channels`);
       return new Response(`<script>alert('✅ Sent to All');location.href='/?pass=admin123'</script>`, { headers: { "Content-Type": "text/html" } });
     }
 
@@ -200,7 +200,7 @@ serve({
           actionLinks: JSON.parse(actionLinksRaw || "[]")
         };
         cache.set("ads", ads);
-        appendLog(`[${new Date().toISOString()}] Updated "${type}" ad settings`);
+        appendLog(`Updated "${type}" ad settings`);
         return new Response(`<script>alert('✅ ${type.toUpperCase()} ad updated');location.href='/?pass=admin123'</script>`, { headers: { "Content-Type": "text/html" } });
       } catch {
         return new Response(`<script>alert('❌ Invalid input');location.href='/?pass=admin123'</script>`, { headers: { "Content-Type": "text/html" } });
@@ -209,28 +209,26 @@ serve({
 
     if (method === "POST" && path.startsWith("/webhook/")) {
       const botToken = path.replace("/webhook/", "");
-
-      // Ignore if this is not a valid Telegram bot token
       if (!isValidTelegramBotToken(botToken)) {
         return new Response("Ignored: Invalid token format");
       }
 
       const update: TelegramUpdate = await req.json();
 
-      // Track bot tokens
+      // Track
       const bots = cache.get("bots") || [];
       cache.set("bots", Array.from(new Set([...bots as string[], botToken])));
 
-      // Token responses, as JSON string
+      // Token responses
       const tokenResponsesRaw = cache.get("token_responses") as string | undefined;
-      const tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {};
+      let tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {};
       tokenResponses[botToken] = (tokenResponses[botToken] || 0) + 1;
       cache.set("token_responses", JSON.stringify(tokenResponses));
 
       const total = (cache.get("total_messages") as number) || 0;
       cache.set("total_messages", total + 1);
 
-      appendLog(`[${new Date().toISOString()}] Webhook: ${botToken} | Count: ${tokenResponses[botToken]}`);
+      appendLog(`Webhook: ${botToken} | Count: ${tokenResponses[botToken]}`);
 
       const activity = update.message || update.edited_message || update.channel_post || update.edited_channel_post || update.my_chat_member || update.chat_member || update.chat_join_request;
       if (!activity) return new Response("Ignored");
@@ -279,7 +277,7 @@ serve({
 
     if (method === "POST" && path === "/clear-cache" && pass === "admin123") {
       cache.flushAll();
-      appendLog(`[${new Date().toISOString()}] Cleared cache`);
+      appendLog(`Cleared cache`);
       return new Response(`<script>alert('🗑 Cache Cleared');location.href='/?pass=admin123'</script>`, {
         headers: { "Content-Type": "text/html" },
       });
