@@ -1,16 +1,9 @@
 import { serve } from "bun";
 import { writeFile, readFile } from "fs/promises";
 
-interface SubButton {
-  label: string;
-  imageUrl?: string;
-  caption?: string;
-}
-
 interface MainButton {
   label: string;
   message: string;
-  subButtons?: SubButton[];
 }
 
 interface MenuConfig {
@@ -19,11 +12,17 @@ interface MenuConfig {
   mainButtons: MainButton[];
 }
 
+// Catalog text with proper spacing
 const CATALOG_MESSAGE = `🔞 MMS 50K+ VIDEOS :- 199/-
+
 💦 SUPER HARD COLLECTION :- 159/-
+
 🔥 C-:P AND R:-P COMBO :- 399/-
+
 🤫 C-:P :- 229/-
+
 🫣 R:-P :- 199/-
+
 😇 VIDEOS AND FILES ONLY`;
 
 const defaults: MenuConfig = {
@@ -49,41 +48,22 @@ try {
 // Logs for admin dashboard
 const logs: { chatId: number; action: string; timestamp: number }[] = [];
 
-// Track catalog clicks
-const catalogClicks: { chatId: number; timestamp: number }[] = [];
+// Track button clicks
+const buttonClicks: { chatId: number; label: string; timestamp: number }[] = [];
 
 function logUser(chatId: number, action: string) {
   logs.push({ chatId, action, timestamp: Date.now() });
   if (logs.length > 1000) logs.shift();
 }
 
+// Create inline keyboard
 function inlineKeyboard(buttons: MainButton[]) {
   return {
     inline_keyboard: buttons.map(b => [{ text: b.label, callback_data: b.label }]),
   };
 }
 
-// Single "Catalog" button
-function catalogButton() {
-  return {
-    inline_keyboard: [[{ text: "📜 Catalog", callback_data: "catalog" }]],
-  };
-}
-
-async function sendPayMessage(botToken: string, chatId: number) {
-  const baseUrl = `https://api.telegram.org/bot${botToken}`;
-  await fetch(`${baseUrl}/sendPhoto`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      photo: menuConfig.defaultImageUrl,
-      caption: menuConfig.defaultCaption,
-      reply_markup: catalogButton(), // show catalog button
-    }),
-  });
-}
-
+// Send catalog message first
 async function sendCatalog(botToken: string, chatId: number) {
   const baseUrl = `https://api.telegram.org/bot${botToken}`;
   await fetch(`${baseUrl}/sendMessage`, {
@@ -95,7 +75,33 @@ async function sendCatalog(botToken: string, chatId: number) {
       reply_markup: inlineKeyboard(menuConfig.mainButtons),
     }),
   });
-  catalogClicks.push({ chatId, timestamp: Date.now() });
+  logUser(chatId, "catalog sent");
+}
+
+// Send image + “send ss” message when user clicks a button
+async function sendPayMessage(botToken: string, chatId: number, label: string) {
+  const baseUrl = `https://api.telegram.org/bot${botToken}`;
+
+  // Optional: send acknowledgment of button clicked
+  await fetch(`${baseUrl}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: `You clicked: ${label}`,
+    }),
+  });
+
+  // Send pay image + caption
+  await fetch(`${baseUrl}/sendPhoto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      photo: menuConfig.defaultImageUrl,
+      caption: menuConfig.defaultCaption,
+    }),
+  });
 }
 
 serve({
@@ -103,32 +109,32 @@ serve({
   async fetch(req) {
     const url = new URL(req.url);
 
-    // Admin dashboard: /admin → shows logs and catalog clicks
-    if (url.pathname === "/admin10882") {
+    // Admin dashboard
+    if (url.pathname === "/admin") {
       return new Response(
-        JSON.stringify({ logs, catalogClicks }, null, 2),
+        JSON.stringify({ logs, buttonClicks }, null, 2),
         { headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // Webhook for bots
+    // Webhook handler
     if (url.pathname.startsWith("/webhook/")) {
       const botToken = url.pathname.split("/")[2];
       const update = await req.json().catch(() => ({}));
       const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
       if (!chatId) return new Response("ok");
 
-      // Handle callback query
+      // If user clicked a button
       if (update.callback_query) {
-        const data = update.callback_query.data;
-        logUser(chatId, `callback: ${data}`);
-        if (data === "catalog") {
-          await sendCatalog(botToken, chatId);
-        }
+        const label = update.callback_query.data;
+        logUser(chatId, `button clicked: ${label}`);
+        buttonClicks.push({ chatId, label, timestamp: Date.now() });
+
+        // Send image + "send ss" message
+        await sendPayMessage(botToken, chatId, label);
       } else {
-        // Any message → send pay message with catalog button
-        logUser(chatId, "sent pay message");
-        await sendPayMessage(botToken, chatId);
+        // Any message → send catalog only
+        await sendCatalog(botToken, chatId);
       }
 
       return new Response("ok");
