@@ -23,18 +23,20 @@ const CATALOG_MESSAGE = `🔞 MMS 50K+ VIDEOS :- 199/-
 
 🫣 R:-P :- 199/-
 
-😇 VIDEOS AND FILES ONLY`;
+😇 VIDEOS AND FILES ONLY
+
+support @Seller_babuji`;
 
 const defaults: MenuConfig = {
   defaultImageUrl: "https://i.ibb.co/pvpn8kDc/x.jpg",
   defaultCaption: "Send payment and send screenshot",
   mainButtons: [
-    { label: "🔞 MMS 50K+ VIDEOS :- 199/-", message: "You selected 🔞 MMS 50K+ VIDEOS :- 199/-" },
-    { label: "💦 SUPER HARD COLLECTION :- 159/-", message: "You selected 💦 SUPER HARD COLLECTION :- 159/-" },
-    { label: "🔥 C-:P AND R:-P COMBO :- 399/-", message: "You selected 🔥 C-:P AND R:-P COMBO :- 399/-" },
-    { label: "🤫 C-:P :- 229/-", message: "You selected 🤫 C-:P :- 229/-" },
-    { label: "🫣 R:-P :- 199/-", message: "You selected 🫣 R:-P :- 199/-" },
-    { label: "😇 VIDEOS AND FILES ONLY", message: "You selected 😇 VIDEOS AND FILES ONLY" },
+    { label: "🔞 MMS 50K+ VIDEOS :- 199/-", message: "You selected - 199/-" },
+    { label: "💦 SUPER HARD COLLECTION :- 159/-", message: "You selected  159/-" },
+    { label: "🔥 C-:P AND R:-P COMBO :- 399/-", message: "You selected  399/-" },
+    { label: "🤫 C-:P :- 229/-", message: "You selected 229/-" },
+    { label: "🫣 R:-P :- 199/-", message: "You selected 199/-" },
+
   ],
 };
 
