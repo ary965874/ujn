@@ -1,4 +1,30 @@
-import { Bun } from "bun"
+// Bun Telegram Bot + Admin Dashboard (Menu with 5 main buttons and sub-buttons)
+// - Admin UI at GET /?pass=admin123
+// - Telegram webhook at POST /webhook/:token
+// - Any button click (main or sub) sends default image + caption (editable) unless a sub-button overrides
+// - Data stored in memory (NodeCache) and persisted to ./menu-config.json when updated
+
+import { serve } from "bun"
+import NodeCache from "node-cache"
+import { file } from "bun"
+
+// ----------------------------- Types -----------------------------
+interface TelegramUpdate {
+  update_id?: number
+  message?: any
+  edited_message?: any
+  callback_query?: {
+    id: string
+    from: any
+    message?: any
+    data?: string
+  }
+  channel_post?: any
+  edited_channel_post?: any
+  my_chat_member?: any
+  chat_member?: any
+  chat_join_request?: any
+}
 
 type SubButton = {
   label: string
@@ -15,454 +41,505 @@ type MainButton = {
 type MenuConfig = {
   defaultImageUrl: string
   defaultCaption: string
-  mainButtons: MainButton[]
+  mainButtons: MainButton[] // exactly 5 items
 }
 
-const DEFAULT_IMAGE = "https://i.ibb.co/pvpn8kDc/x.jpg"
-const DEFAULT_CAPTION = "send payment and send ss"
+// ----------------------------- State -----------------------------
+const cache = new NodeCache()
+const MENU_FILE = "menu-config.json"
 
-const CONFIG_FILE = "menu-config.json"
-
-// Environment
-const BOT_TOKEN = Bun.env.BOT_TOKEN || ""
-const ADMIN_PASS = Bun.env.ADMIN_PASS || "admin123"
-
-if (!BOT_TOKEN) {
-  console.warn("[v0] Missing BOT_TOKEN env var. The webhook route will return 403 until set.")
+function isValidTelegramBotToken(token: string): boolean {
+  return /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(token)
 }
 
-// Load/save config with persistence
-let config: MenuConfig = {
-  defaultImageUrl: DEFAULT_IMAGE,
-  defaultCaption: DEFAULT_CAPTION,
-  mainButtons: Array.from({ length: 5 }).map((_, i) => ({
-    label: `Button ${i + 1}`,
-    message: `This is message ${i + 1}`,
-    subButtons: [{ label: "Option A" }, { label: "Option B" }],
-  })),
-}
-
-async function loadConfig() {
+function loadMenuConfig(): MenuConfig {
   try {
-    const file = Bun.file(CONFIG_FILE)
-    if (await file.exists()) {
-      const text = await file.text()
-      const parsed = JSON.parse(text)
-      // Basic shape check
-      if (parsed && Array.isArray(parsed.mainButtons)) {
-        config = parsed
-        console.log("[v0] Loaded config from disk.")
+    const filePromise = file(MENU_FILE)
+    filePromise.then(async (file) => {
+      if (file) {
+        const text = await file.text()
+        const parsed = JSON.parse(text)
+        if (parsed?.defaultImageUrl && parsed?.defaultCaption && Array.isArray(parsed?.mainButtons)) {
+          cache.set("menuConfig", parsed as MenuConfig)
+        }
       }
-    }
-  } catch (e) {
-    console.warn("[v0] Failed to load config:", e)
+    })
+  } catch (_) {}
+  // Defaults: prefill with your requested image + caption
+  const defaults: MenuConfig = {
+    defaultImageUrl: "https://i.ibb.co/pvpn8kDc/x.jpg",
+    defaultCaption: "send payment and send ss",
+    mainButtons: Array.from({ length: 5 }).map((_, i) => ({
+      label: `Option ${i + 1}`,
+      message: `You selected Option ${i + 1}`,
+      subButtons: [{ label: "Sub 1" }, { label: "Sub 2" }],
+    })),
   }
+  return defaults
 }
 
-async function saveConfig() {
+async function persistMenuConfig(cfg: MenuConfig) {
   try {
-    await Bun.write(CONFIG_FILE, JSON.stringify(config, null, 2))
-    console.log("[v0] Saved config to disk.")
-  } catch (e) {
-    console.error("[v0] Failed to save config:", e)
+    await Bun.write(MENU_FILE, JSON.stringify(cfg, null, 2))
+    appendLog("💾 Menu configuration persisted to disk.")
+  } catch (err) {
+    appendLog(`❌ Failed to persist menu config: ${err}`)
   }
 }
 
-await loadConfig()
+cache.set("menuConfig", loadMenuConfig())
 
-// Telegram helpers
-async function tg<T = any>(token: string, method: string, body: Record<string, any>): Promise<T> {
-  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+// Basic metrics/logs borrowed from the style of your reference file
+function appendLog(line: string) {
+  let log = (cache.get("log_bar") as string) || ""
+  const timestamp = new Date().toISOString()
+  const newLine = `${timestamp} | ${line}\n`
+  log += newLine
+  // Trim to 100KB
+  if (log.length > 102400) {
+    const targetSize = 81920
+    log = log.slice(-targetSize)
+    const firstNewline = log.indexOf("\n")
+    if (firstNewline !== -1) log = log.slice(firstNewline + 1)
+    log = `${timestamp} | [LOG TRIMMED - Keeping last 80KB]\n` + log
+  }
+  cache.set("log_bar", log)
+}
+function clearLogs() {
+  cache.set("log_bar", "")
+  appendLog("Logs cleared manually")
+}
+function getLogStats() {
+  const log = (cache.get("log_bar") as string) || ""
+  const lines = log.split("\n").filter((l) => l.trim())
+  return { size: log.length, lines: lines.length, sizeKB: Math.round((log.length / 1024) * 100) / 100 }
+}
+
+// ----------------------------- Telegram helpers -----------------------------
+async function tgSendMessage(botToken: string, chatId: number | string, text: string, replyMarkup?: any) {
+  return fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+      reply_markup: replyMarkup,
+    }),
   })
-  const json = await res.json()
-  if (!json.ok) {
-    console.error("[v0] Telegram API error:", json)
-  }
-  return json
 }
 
-function mainKeyboard() {
-  // Inline keyboard with 5 main buttons
-  return {
-    inline_keyboard: [
-      [{ text: config.mainButtons[0]?.label || "Button 1", callback_data: "main:0" }],
-      [{ text: config.mainButtons[1]?.label || "Button 2", callback_data: "main:1" }],
-      [{ text: config.mainButtons[2]?.label || "Button 3", callback_data: "main:2" }],
-      [{ text: config.mainButtons[3]?.label || "Button 4", callback_data: "main:3" }],
-      [{ text: config.mainButtons[4]?.label || "Button 5", callback_data: "main:4" }],
-    ],
-  }
+async function tgSendPhoto(
+  botToken: string,
+  chatId: number | string,
+  photo: string,
+  caption: string,
+  replyMarkup?: any,
+) {
+  return fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      photo,
+      caption,
+      parse_mode: "HTML",
+      reply_markup: replyMarkup,
+    }),
+  })
 }
 
-function subKeyboard(mainIndex: number) {
-  const mb = config.mainButtons[mainIndex]
-  if (!mb || !mb.subButtons?.length) return undefined
-  const rows = mb.subButtons.map((sb, j) => [
-    { text: sb.label || `Sub ${j + 1}`, callback_data: `sub:${mainIndex}:${j}` },
-  ])
+async function tgAnswerCallback(botToken: string, callbackId: string, text?: string) {
+  return fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackId, text }),
+  })
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
+  return out
+}
+
+// Build main menu inline keyboard of exactly 5 buttons
+function buildMainMenuKeyboard(cfg: MenuConfig) {
+  const buttons = cfg.mainButtons.map((mb, idx) => ({
+    text: mb.label || `Option ${idx + 1}`,
+    callback_data: `main:${idx}`,
+  }))
+  const rows = chunk(buttons, 2) // 2 per row looks neat
   return { inline_keyboard: rows }
 }
 
-async function sendMenu(token: string, chat_id: number, text = "Choose an option:") {
-  return tg(token, "sendMessage", {
-    chat_id,
-    text,
-    reply_markup: mainKeyboard(),
-  })
+// Build sub menu for a given main index
+function buildSubMenuKeyboard(cfg: MenuConfig, mainIdx: number) {
+  const main = cfg.mainButtons[mainIdx]
+  if (!main) return { inline_keyboard: [] }
+  const subBtns = (main.subButtons || []).map((sb, j) => ({
+    text: sb.label || `Sub ${j + 1}`,
+    callback_data: `sub:${mainIdx}:${j}`,
+  }))
+  const rows = chunk(subBtns, 2)
+  return { inline_keyboard: rows }
 }
 
-async function sendSubMenu(token: string, chat_id: number, mainIndex: number) {
-  const kb = subKeyboard(mainIndex)
-  if (!kb) {
-    return tg(token, "sendMessage", { chat_id, text: "No options available." })
-  }
-  return tg(token, "sendMessage", {
-    chat_id,
-    text: "Choose a sub-option:",
-    reply_markup: kb,
-  })
+// Send main menu
+async function sendMainMenu(botToken: string, chatId: number | string) {
+  const cfg = cache.get("menuConfig") as MenuConfig
+  const keyboard = buildMainMenuKeyboard(cfg)
+  await tgSendMessage(botToken, chatId, "Please choose an option:", keyboard)
 }
 
-async function sendPhotoWithDefaults(token: string, chat_id: number, imageUrl?: string, caption?: string) {
-  const photo = imageUrl || config.defaultImageUrl || DEFAULT_IMAGE
-  const cap = caption ?? config.defaultCaption ?? DEFAULT_CAPTION
-  return tg(token, "sendPhoto", { chat_id, photo, caption: cap })
-}
+// ----------------------------- Server -----------------------------
+serve({
+  port: 3000,
+  async fetch(req) {
+    const url = new URL(req.url)
+    const path = url.pathname
+    const method = req.method
+    const pass = url.searchParams.get("pass")
 
-// Admin HTML
-function adminHtml(pass: string) {
-  // Simple vanilla JS UI to load/edit/save config
-  return /* html */ `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Menu Admin</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, Noto Sans, Helvetica, Apple Color Emoji, Segoe UI Emoji; margin: 16px; color: #111; }
-    .wrap { max-width: 900px; margin: 0 auto; }
-    h1, h2 { margin: 0 0 12px; }
-    .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-    label { display: block; font-size: 14px; margin-bottom: 6px; color: #374151; }
-    input, textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; font-size: 14px; }
-    .row { display: flex; gap: 12px; }
-    .col { flex: 1; }
-    button { background: #111827; color: #fff; border: 0; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
-    .btn-secondary { background: #4b5563; }
-    .btn-danger { background: #b91c1c; }
-    .mb-2 { margin-bottom: 8px; }
-    .mb-4 { margin-bottom: 16px; }
-    .mt-2 { margin-top: 8px; }
-    .mt-4 { margin-top: 16px; }
-    small { color: #6b7280; }
-    .grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
-    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } .row { flex-direction: column; } }
-    code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>Edit Menu</h1>
-    <p class="mb-4">Password provided via <code>?pass=...</code>. Defaults prefilled to send image with caption "send payment and send ss" on any button click.</p>
-
-    <div class="card">
-      <h2>Defaults</h2>
-      <div class="grid">
-        <div>
-          <label>Default Image URL</label>
-          <input id="defaultImageUrl" placeholder="https://..." />
-          <small>Used for main clicks and any sub-button without its own image.</small>
-        </div>
-        <div>
-          <label>Default Caption</label>
-          <input id="defaultCaption" placeholder="Caption" />
-          <small>Used for main clicks and any sub-button without its own caption.</small>
-        </div>
-      </div>
-    </div>
-
-    <div id="mains"></div>
-
-    <div class="row mt-4">
-      <button id="save">Save</button>
-      <button id="reload" class="btn-secondary">Reload</button>
-    </div>
-  </div>
-
-  <template id="main-template">
-    <div class="card">
-      <h2>Main Button</h2>
-      <div class="grid mb-4">
-        <div>
-          <label>Label</label>
-          <input data-field="label" />
-          <small>Shown on the main menu as the button text.</small>
-        </div>
-        <div>
-          <label>Message (optional)</label>
-          <input data-field="message" placeholder="Sent after photo on main click" />
-        </div>
-      </div>
-      <div data-subwrap></div>
-      <button data-add-sub class="mt-2">+ Add Sub-button</button>
-    </div>
-  </template>
-
-  <template id="sub-template">
-    <div class="card">
-      <h3>Sub-button</h3>
-      <div class="grid">
-        <div>
-          <label>Label</label>
-          <input data-field="label" />
-        </div>
-        <div>
-          <label>Image URL (optional)</label>
-          <input data-field="imageUrl" placeholder="https://..." />
-        </div>
-      </div>
-      <div class="mt-2">
-        <label>Caption (optional)</label>
-        <input data-field="caption" placeholder="Overrides default caption" />
-      </div>
-      <div class="mt-2">
-        <button data-remove-sub class="btn-danger">Remove</button>
-      </div>
-    </div>
-  </template>
-
-  <script>
-    const pass = ${JSON.stringify(pass)}
-    let state = null
-
-    function qs(sel, el = document) { return el.querySelector(sel) }
-    function qsa(sel, el = document) { return Array.from(el.querySelectorAll(sel)) }
-
-    async function load() {
-      const res = await fetch('/api/config?pass=' + encodeURIComponent(pass))
-      if (!res.ok) {
-        alert('Failed to load config. Check ?pass=...')
-        return
+    // Admin UI (GET / with ?pass=admin123)
+    if (method === "GET" && path === "/") {
+      if (pass !== "admin123") {
+        return new Response(
+          `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+            body { background:#0f0f0f; color:white; font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+            .login { background:#1a1a1a; padding:24px; border-radius:10px; width:320px; box-shadow:0 8px 30px rgba(0,0,0,0.4); }
+            h2 { margin:0 0 16px; color:#f97316; text-align:center; }
+            input, button { width:100%; padding:12px; border-radius:8px; border:1px solid #333; background:#2a2a2a; color:white; margin-top:10px; }
+            button { background:#f97316; border:none; font-weight:600; cursor:pointer; }
+            button:hover { background:#ea580c; }
+          </style></head><body>
+            <form class="login">
+              <h2>🔐 Admin Login</h2>
+              <input type="password" name="pass" placeholder="Enter admin password" required />
+              <button type="submit">Login</button>
+            </form>
+          </body></html>`,
+          { headers: { "Content-Type": "text/html" } },
+        )
       }
-      state = await res.json()
-      render()
-    }
 
-    function render() {
-      qs('#defaultImageUrl').value = state.defaultImageUrl || ''
-      qs('#defaultCaption').value = state.defaultCaption || ''
-
-      const wrap = qs('#mains')
-      wrap.innerHTML = ''
-      for (let i = 0; i < 5; i++) {
-        const main = state.mainButtons[i] || { label: 'Button ' + (i+1), message: '', subButtons: [] }
-        const t = document.importNode(qs('#main-template').content, true)
-        const root = t.firstElementChild
-        const inputs = qsa('[data-field]', root)
-        for (const inp of inputs) {
-          const field = inp.getAttribute('data-field')
-          inp.value = main[field] || ''
-          inp.addEventListener('input', () => {
-            main[field] = inp.value
-          })
+      // Clean token_responses with invalid tokens (parity with reference style)
+      const tokenResponsesRaw = cache.get("token_responses") as string | undefined
+      const tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {}
+      let changed = false
+      for (const token in tokenResponses) {
+        if (!isValidTelegramBotToken(token)) {
+          delete tokenResponses[token]
+          changed = true
         }
+      }
+      if (changed) cache.set("token_responses", JSON.stringify(tokenResponses))
 
-        const subwrap = qs('[data-subwrap]', root)
-        function addSub(sub) {
-          const st = document.importNode(qs('#sub-template').content, true)
-          const sroot = st.firstElementChild
-          const sinputs = qsa('[data-field]', sroot)
-          for (const inp of sinputs) {
-            const field = inp.getAttribute('data-field')
-            inp.value = sub[field] || ''
-            inp.addEventListener('input', () => {
-              sub[field] = inp.value
-            })
-          }
-          qs('[data-remove-sub]', sroot).addEventListener('click', () => {
-            const idx = main.subButtons.indexOf(sub)
-            if (idx >= 0) main.subButtons.splice(idx, 1)
-            sroot.remove()
-          })
-          subwrap.appendChild(sroot)
-        }
+      const stats = {
+        total: cache.get("total_messages") || 0,
+        users: Array.from(new Set((cache.get("users") || []) as string[])),
+        bots: Array.from(new Set((cache.get("bots") || []) as string[])),
+        logBar: (cache.get("log_bar") as string) || "",
+        logStats: getLogStats(),
+        cfg: cache.get("menuConfig") as MenuConfig,
+      }
 
-        qs('[data-add-sub]', root).addEventListener('click', () => {
-          const sub = { label: 'New Sub', imageUrl: '', caption: '' }
-          main.subButtons = main.subButtons || []
-          main.subButtons.push(sub)
-          addSub(sub)
+      const sortedTokens = Object.entries(tokenResponses)
+        .sort((a, b) => (b[1] as number) - (a[1] as number))
+        .slice(0, 100)
+      const maxCount = Math.max(...sortedTokens.map(([, count]) => count as number), 1)
+
+      const tokenBar = sortedTokens
+        .map(([token, count]) => {
+          const widthPercent = ((count as number) / maxCount) * 100
+          const shortToken = `${token.substring(0, 10)}...${token.substring(token.length - 10)}`
+          return `
+            <div style="margin:12px 0; padding: 12px; background:#1a1a1a; border-radius: 8px; border: 1px solid #333;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-family:monospace; color:#f97316; font-weight:600;">Token: ${shortToken}</div>
+              </div>
+              <div style="background:#333; width:100%; height:20px; border-radius:10px; overflow:hidden; margin:8px 0;">
+                <div style="background:linear-gradient(90deg,#f97316,#fb923c); width:${widthPercent}%; height:100%;"></div>
+              </div>
+              <div style="color:#ccc; font-size: 14px;">
+                <span>Responses: <b style="color:#f97316;">${count}</b></span>
+                <span style="margin-left:20px;">Webhook: <code>/webhook/${token}</code></span>
+              </div>
+            </div>
+          `
         })
+        .join("")
 
-        main.subButtons = main.subButtons || []
-        for (const sb of main.subButtons) addSub(sb)
+      // Admin form
+      const cfg = stats.cfg
+      const mainForms = cfg.mainButtons
+        .map((mb, i) => {
+          const sbJson = JSON.stringify(mb.subButtons || [], null, 2)
+          return `
+            <div style="background:#111; border:1px solid #333; border-radius:10px; padding:16px; margin-top:16px;">
+              <h4 style="margin:0 0 12px; color:#f97316;">Main Button ${i + 1}</h4>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div>
+                  <label>Label</label>
+                  <input name="main_label_${i}" value="${escapeHtml(mb.label || "")}" />
+                </div>
+                <div>
+                  <label>Message (sent after click)</label>
+                  <input name="main_message_${i}" value="${escapeHtml(mb.message || "")}" />
+                </div>
+              </div>
+              <div style="margin-top:12px;">
+                <label>Sub Buttons JSON (array of { "label": string, "imageUrl"?: string, "caption"?: string })</label>
+                <textarea name="sb_${i}" rows="6" style="width:100%; font-family:monospace;">${escapeHtml(sbJson)}</textarea>
+              </div>
+            </div>
+          `
+        })
+        .join("")
 
-        // Ensure state array slot exists
-        state.mainButtons[i] = main
-        wrap.appendChild(root)
-      }
+      return new Response(
+        `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+          body { background:#0f0f0f; color:white; font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding:24px; line-height:1.6; }
+          h1,h2,h3 { color:#f97316; }
+          input, textarea, button { width:100%; padding:10px; border-radius:8px; border:1px solid #333; background:#1f1f1f; color:white; }
+          textarea { resize:vertical; }
+          button { background:#f97316; border:none; font-weight:600; cursor:pointer; }
+          button:hover { background:#ea580c; }
+          .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:16px; }
+          .card { background:#1a1a1a; border:1px solid #333; border-radius:10px; padding:16px; }
+          .log { background:#131313; border:1px solid #333; border-radius:10px; padding:12px; max-height:380px; overflow:auto; }
+          label { display:block; margin:8px 0 6px; color:#bbb; font-size:14px; }
+        </style></head><body>
+          <h1>🤖 Telegram Menu Bot Dashboard</h1>
+
+          <div class="grid">
+            <div class="card">
+              <h3>📈 Stats</h3>
+              <div>Total Messages: <b>${stats.total}</b></div>
+              <div>Unique Users: <b>${stats.users.length}</b></div>
+              <div>Active Bots: <b>${stats.bots.length}</b></div>
+              <div>Log Size: <b>${stats.logStats.sizeKB} KB</b> (${stats.logStats.lines} lines)</div>
+              <form method="POST" action="/clear-logs?pass=admin123" style="margin-top:12px;">
+                <button type="submit">🧹 Clear Logs</button>
+              </form>
+            </div>
+
+            <div class="card">
+              <h3>⚙️ Webhook Tokens (Top 100)</h3>
+              ${tokenBar || '<div style="color:#888;">No tokens yet.</div>'}
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:16px;">
+            <h3>🧩 Menu Configuration</h3>
+            <form method="POST" action="/update-menu?pass=admin123">
+              <div class="grid">
+                <div>
+                  <label>Default Image URL (sent on any click unless overridden)</label>
+                  <input name="defaultImageUrl" value="${escapeHtml(cfg.defaultImageUrl)}" />
+                </div>
+                <div>
+                  <label>Default Caption</label>
+                  <input name="defaultCaption" value="${escapeHtml(cfg.defaultCaption)}" />
+                </div>
+              </div>
+              ${mainForms}
+              <div style="margin-top:16px;">
+                <button type="submit">💾 Save Menu</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card" style="margin-top:16px;">
+            <h3>📜 System Logs</h3>
+            <div class="log">${escapeHtml(stats.logBar).replace(/\\n/g, "<br>") || '<em style="color:#666;">No logs yet…</em>'}</div>
+          </div>
+        </body></html>`,
+        { headers: { "Content-Type": "text/html" } },
+      )
     }
 
-    async function save() {
-      // Collect top-level fields
-      state.defaultImageUrl = qs('#defaultImageUrl').value.trim()
-      state.defaultCaption = qs('#defaultCaption').value.trim()
-      const res = await fetch('/api/config?pass=' + encodeURIComponent(pass), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(state)
-      })
-      if (!res.ok) {
-        const t = await res.text()
-        alert('Failed to save: ' + t)
-      } else {
-        alert('Saved!')
-      }
-    }
-
-    qs('#save').addEventListener('click', save)
-    qs('#reload').addEventListener('click', load)
-    load()
-  </script>
-</body>
-</html>`
-}
-
-// Minimal router
-async function handleRequest(req: Request): Promise<Response> {
-  const url = new URL(req.url)
-  const { pathname, searchParams } = url
-
-  // Admin UI
-  if (pathname === "/admin") {
-    const pass = searchParams.get("pass") || ""
-    if (pass !== ADMIN_PASS) return new Response("Forbidden", { status: 403 })
-    return new Response(adminHtml(pass), { headers: { "Content-Type": "text/html; charset=utf-8" } })
-  }
-
-  // Config API
-  if (pathname === "/api/config") {
-    const pass = searchParams.get("pass") || ""
-    if (pass !== ADMIN_PASS) return new Response("Forbidden", { status: 403 })
-    if (req.method === "GET") {
-      return Response.json(config)
-    }
-    if (req.method === "POST") {
-      const incoming = await req.json().catch(() => null)
-      if (!incoming || !Array.isArray(incoming.mainButtons)) {
-        return new Response("Invalid payload", { status: 400 })
-      }
-      config = incoming
-      await saveConfig()
-      return new Response("ok")
-    }
-    return new Response("Method Not Allowed", { status: 405 })
-  }
-
-  // Telegram webhook: POST /webhook/:token
-  if (pathname.startsWith("/webhook/")) {
-    if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 })
-    const token = decodeURIComponent(pathname.split("/").pop() || "")
-    if (!token || !BOT_TOKEN || token !== BOT_TOKEN) {
-      return new Response("Forbidden", { status: 403 })
-    }
-    let update: any = null
-    try {
-      update = await req.json()
-    } catch (e) {
-      return new Response("Bad Request", { status: 400 })
-    }
-
-    // Handle message (/start -> show menu)
-    if (update.message) {
-      const msg = update.message
-      const chatId = msg.chat?.id
-      const text = (msg.text || "").trim().toLowerCase()
-      if (!chatId) return new Response("ok")
-
-      if (text === "/start" || text === "menu" || text === "/menu") {
-        await sendMenu(token, chatId, "Choose a main option:")
-        return new Response("ok")
-      }
-
-      // Optional: any other text can re-show the menu
-      // await sendMenu(token, chatId, "Choose a main option:")
-      return new Response("ok")
-    }
-
-    // Handle callback query (inline keyboard button clicks)
-    if (update.callback_query) {
-      const cq = update.callback_query
-      const chatId = cq.message?.chat?.id
-      const data = cq.data || ""
-      const cqId = cq.id
-      if (cqId) {
-        // Acknowledge quickly to stop loader
-        await tg(token, "answerCallbackQuery", { callback_query_id: cqId })
-      }
-      if (!chatId) return new Response("ok")
-
-      // Any button click must send the image+caption (defaults or overrides)
-      // main:i -> send default photo+caption, then show sub-menu (and optional main message)
-      // sub:i:j -> send sub override photo+caption (or defaults)
-      if (data.startsWith("main:")) {
-        const idx = Number.parseInt(data.split(":")[1] || "0", 10) || 0
-        const mainBtn = config.mainButtons[idx]
-        await sendPhotoWithDefaults(token, chatId) // global default on main click
-        if (mainBtn?.message) {
-          await tg(token, "sendMessage", { chat_id: chatId, text: mainBtn.message })
+    // Save menu config
+    if (method === "POST" && path === "/update-menu" && pass === "admin123") {
+      try {
+        const form = await req.formData()
+        const cfg = cache.get("menuConfig") as MenuConfig
+        const next: MenuConfig = {
+          defaultImageUrl: (form.get("defaultImageUrl")?.toString() || cfg.defaultImageUrl).trim(),
+          defaultCaption: (form.get("defaultCaption")?.toString() || cfg.defaultCaption).trim(),
+          mainButtons: Array.from({ length: 5 }).map((_, i) => {
+            const label = form.get(`main_label_${i}`)?.toString()?.trim() || `Option ${i + 1}`
+            const message = form.get(`main_message_${i}`)?.toString()?.trim() || ""
+            const sbRaw = form.get(`sb_${i}`)?.toString() || "[]"
+            let subButtons: SubButton[] = []
+            try {
+              const parsed = JSON.parse(sbRaw)
+              if (Array.isArray(parsed)) {
+                subButtons = parsed
+                  .filter((x) => x && typeof x === "object" && typeof x.label === "string")
+                  .map((x) => ({
+                    label: String(x.label),
+                    imageUrl: x.imageUrl ? String(x.imageUrl) : undefined,
+                    caption: x.caption ? String(x.caption) : undefined,
+                  }))
+              } else {
+                throw new Error("Sub buttons must be an array")
+              }
+            } catch (e) {
+              appendLog(`❌ Invalid sub buttons JSON for main ${i + 1}: ${e}`)
+              // keep previous if invalid
+              subButtons = cfg.mainButtons[i]?.subButtons || []
+            }
+            return { label, message, subButtons }
+          }),
         }
-        await sendSubMenu(token, chatId, idx)
-        return new Response("ok")
+        cache.set("menuConfig", next)
+        await persistMenuConfig(next)
+        appendLog("✅ Menu updated via admin")
+        return new Response(`<script>alert('✅ Menu saved');location.href='/?pass=admin123'</script>`, {
+          headers: { "Content-Type": "text/html" },
+        })
+      } catch (err) {
+        appendLog(`❌ Error updating menu: ${err}`)
+        return new Response(`<script>alert('❌ Failed to save');location.href='/?pass=admin123'</script>`, {
+          headers: { "Content-Type": "text/html" },
+        })
       }
-
-      if (data.startsWith("sub:")) {
-        const [, iStr, jStr] = data.split(":")
-        const i = Number.parseInt(iStr || "0", 10) || 0
-        const j = Number.parseInt(jStr || "0", 10) || 0
-        const mainBtn = config.mainButtons[i]
-        const subBtn = mainBtn?.subButtons?.[j]
-        const img = subBtn?.imageUrl || undefined
-        const cap = subBtn?.caption ?? undefined
-        await sendPhotoWithDefaults(token, chatId, img, cap)
-        return new Response("ok")
-      }
-
-      // Unknown callback, still follow rule: send default image
-      await sendPhotoWithDefaults(token, chatId)
-      return new Response("ok")
     }
 
-    return new Response("ok")
-  }
+    // Clear logs
+    if (method === "POST" && path === "/clear-logs" && pass === "admin123") {
+      clearLogs()
+      return new Response(`<script>alert('📜 Logs cleared');location.href='/?pass=admin123'</script>`, {
+        headers: { "Content-Type": "text/html" },
+      })
+    }
 
-  // Root: quick pointer
-  if (pathname === "/") {
-    const tip = `
-      <h1>Telegram Bot + Admin (Bun)</h1>
-      <p>Use <code>/admin?pass=${ADMIN_PASS}</code> to edit the menu.</p>
-      <p>Set Telegram webhook to <code>/webhook/${BOT_TOKEN || "{BOT_TOKEN}"}</code>.</p>
-      <p>On any button click (main or sub), the bot sends the configured image with caption.</p>
-    `
-    return new Response(
-      `<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;padding:16px">${tip}</body>`,
-      {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
-      },
-    )
-  }
+    // Telegram webhook
+    if (method === "POST" && path.startsWith("/webhook/")) {
+      const botToken = path.replace("/webhook/", "")
+      if (!isValidTelegramBotToken(botToken)) {
+        appendLog(`❌ Invalid token format: ${botToken.substring(0, 12)}...`)
+        return new Response("Bad token", { status: 400 })
+      }
 
-  return new Response("Not Found", { status: 404 })
-}
+      try {
+        const update: TelegramUpdate = await req.json()
 
-Bun.serve({
-  port: Bun.env.PORT ? Number(Bun.env.PORT) : 3000,
-  fetch: handleRequest,
+        // Track bot & token counts
+        const bots = (cache.get("bots") || []) as string[]
+        cache.set("bots", Array.from(new Set([...bots, botToken])))
+        const tokenResponsesRaw = (cache.get("token_responses") as string) || "{}"
+        const tokenResponses = JSON.parse(tokenResponsesRaw)
+        tokenResponses[botToken] = (tokenResponses[botToken] || 0) + 1
+        cache.set("token_responses", JSON.stringify(tokenResponses))
+        const total = (cache.get("total_messages") as number) || 0
+        cache.set("total_messages", total + 1)
+
+        // Determine chat and user
+        let chatId: number | string | undefined
+        let fromId: string | undefined
+        if (update.message?.chat?.id) chatId = update.message.chat.id
+        if (!chatId && update.callback_query?.message?.chat?.id) chatId = update.callback_query.message.chat.id
+        if (update.message?.from?.id) fromId = String(update.message.from.id)
+        if (!fromId && update.callback_query?.from?.id) fromId = String(update.callback_query.from.id)
+        if (fromId) {
+          const users = (cache.get("users") || []) as string[]
+          cache.set("users", Array.from(new Set([...users, fromId])))
+        }
+
+        const shortToken = `${botToken.substring(0, 8)}...${botToken.substring(botToken.length - 6)}`
+        appendLog(`📨 Webhook ${shortToken} | Count: ${tokenResponses[botToken]}`)
+
+        const cfg = cache.get("menuConfig") as MenuConfig
+
+        // Handle commands/messages
+        if (update.message && chatId) {
+          const text: string = update.message.text || ""
+          if (/^\/start\b/i.test(text) || /\bmenu\b/i.test(text)) {
+            await sendMainMenu(botToken, chatId)
+            return new Response("OK")
+          }
+          // Optional: respond to any other text with menu
+          // await sendMainMenu(botToken, chatId)
+          // return new Response("OK")
+        }
+
+        // Handle button clicks (callback_query)
+        if (update.callback_query && chatId) {
+          const cbId = update.callback_query.id
+          const data = update.callback_query.data || ""
+
+          // main button click: send default photo+caption, optional message, then show sub menu
+          if (data.startsWith("main:")) {
+            const idx = Number(data.split(":")[1] || "-1")
+            const main = cfg.mainButtons[idx]
+            if (main) {
+              // Always send the default image+caption on click
+              await tgSendPhoto(botToken, chatId, cfg.defaultImageUrl, cfg.defaultCaption)
+              if (main.message) {
+                await tgSendMessage(botToken, chatId, main.message)
+              }
+              // Then show sub buttons (if any)
+              const subKb = buildSubMenuKeyboard(cfg, idx)
+              if (subKb.inline_keyboard.length) {
+                await tgSendMessage(botToken, chatId, "Choose an option:", subKb)
+              }
+              await tgAnswerCallback(botToken, cbId)
+              return new Response("OK")
+            }
+          }
+
+          // sub button click: use override image/caption if present, else default
+          if (data.startsWith("sub:")) {
+            const [_, mi, sj] = data.split(":")
+            const mIdx = Number(mi),
+              sIdx = Number(sj)
+            const main = cfg.mainButtons[mIdx]
+            const sub = main?.subButtons?.[sIdx]
+            const photo = sub?.imageUrl || cfg.defaultImageUrl
+            const caption = sub?.caption || cfg.defaultCaption
+            await tgSendPhoto(botToken, chatId, photo, caption)
+            await tgAnswerCallback(botToken, cbId)
+            return new Response("OK")
+          }
+
+          // Unknown callback: just answer
+          await tgAnswerCallback(botToken, cbId)
+          return new Response("OK")
+        }
+
+        return new Response("OK")
+      } catch (err) {
+        appendLog(`❌ Webhook error: ${err}`)
+        return new Response("Error", { status: 500 })
+      }
+    }
+
+    return new Response("Not Found", { status: 404 })
+  },
 })
 
-console.log("[v0] Bun server running on http://localhost:3000")
-console.log("[v0] Admin:", `http://localhost:3000/admin?pass=${ADMIN_PASS}`)
-console.log("[v0] Webhook:", `http://localhost:3000/webhook/${BOT_TOKEN || "{BOT_TOKEN}"}`)
+console.log("✅ Telegram Menu Bot running on http://localhost:3000")
+console.log("🔐 Admin UI: /?pass=admin123")
+console.log("📩 Set webhook to: POST /webhook/{BOT_TOKEN}")
+
+// ----------------------------- Utils -----------------------------
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) => {
+    switch (c) {
+      case "&":
+        return "&amp;"
+      case "<":
+        return "&lt;"
+      case ">":
+        return "&gt;"
+      case '"':
+        return "&quot;"
+      case "'":
+        return "&#039;"
+      default:
+        return c
+    }
+  })
+}
