@@ -1,638 +1,468 @@
-import { serve } from "bun"
-import NodeCache from "node-cache"
+import { Bun } from "bun"
 
-interface TelegramUpdate {
-  message?: any
-  edited_message?: any
-  channel_post?: any
-  edited_channel_post?: any
-  my_chat_member?: any
-  chat_member?: any
-  chat_join_request?: any
-  callback_query?: any // handle inline button presses
+type SubButton = {
+  label: string
+  imageUrl?: string
+  caption?: string
 }
 
-const cache = new NodeCache()
-
-cache.set("ads", {
-  permanent: {
-    imageSource: "https://i.ibb.co/J66PqCQ/x.jpg",
-    captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥\n\n💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥\n\n🎬 <i>Fresh leaked content daily</i>\n🔞 <b>18+ Adult Material</b>\n💎 <i>Premium quality videos & files</i>\n🚀 <b>Instant access available</b>\n\n⬇️ <b><u>Click any server below</u></b> ⬇️`,
-    actionLinks: [
-      { linkText: "🎥 VIDEOS💦", linkDestination: "https://t.me/+Go8FEdh9M8Y3ZWU1" },
-      { linkText: "📁 FILES🍑", linkDestination: "https://t.me/+06bZb-fbn4kzNjll" },
-    ],
-  },
-  temporary: null,
-})
-
-function isValidTelegramBotToken(token: string): boolean {
-  return /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(token)
+type MainButton = {
+  label: string
+  message?: string
+  subButtons: SubButton[]
 }
 
-function appendLog(line: string) {
-  let log = (cache.get("log_bar") as string) || ""
-  const timestamp = new Date().toISOString()
-  const newLine = `${timestamp} | ${line}\n`
+type MenuConfig = {
+  defaultImageUrl: string
+  defaultCaption: string
+  mainButtons: MainButton[]
+}
 
-  log += newLine
+const DEFAULT_IMAGE = "https://i.ibb.co/pvpn8kDc/x.jpg"
+const DEFAULT_CAPTION = "send payment and send ss"
 
-  // Auto-delete when exceeding 100KB (102400 bytes)
-  if (log.length > 102400) {
-    // Keep only the last 80KB to prevent frequent trimming
-    const targetSize = 81920 // 80KB
-    log = log.slice(-targetSize)
+const CONFIG_FILE = "menu-config.json"
 
-    // Find the first complete line to avoid cutting mid-line
-    const firstNewline = log.indexOf("\n")
-    if (firstNewline !== -1) {
-      log = log.slice(firstNewline + 1)
+// Environment
+const BOT_TOKEN = Bun.env.BOT_TOKEN || ""
+const ADMIN_PASS = Bun.env.ADMIN_PASS || "admin123"
+
+if (!BOT_TOKEN) {
+  console.warn("[v0] Missing BOT_TOKEN env var. The webhook route will return 403 until set.")
+}
+
+// Load/save config with persistence
+let config: MenuConfig = {
+  defaultImageUrl: DEFAULT_IMAGE,
+  defaultCaption: DEFAULT_CAPTION,
+  mainButtons: Array.from({ length: 5 }).map((_, i) => ({
+    label: `Button ${i + 1}`,
+    message: `This is message ${i + 1}`,
+    subButtons: [{ label: "Option A" }, { label: "Option B" }],
+  })),
+}
+
+async function loadConfig() {
+  try {
+    const file = Bun.file(CONFIG_FILE)
+    if (await file.exists()) {
+      const text = await file.text()
+      const parsed = JSON.parse(text)
+      // Basic shape check
+      if (parsed && Array.isArray(parsed.mainButtons)) {
+        config = parsed
+        console.log("[v0] Loaded config from disk.")
+      }
     }
-
-    // Add a marker to show logs were trimmed
-    log = `${timestamp} | [LOG TRIMMED - Keeping last 80KB]\n` + log
+  } catch (e) {
+    console.warn("[v0] Failed to load config:", e)
   }
-
-  cache.set("log_bar", log)
 }
 
-function clearLogs() {
-  cache.set("log_bar", "")
-  appendLog("Logs cleared manually")
+async function saveConfig() {
+  try {
+    await Bun.write(CONFIG_FILE, JSON.stringify(config, null, 2))
+    console.log("[v0] Saved config to disk.")
+  } catch (e) {
+    console.error("[v0] Failed to save config:", e)
+  }
 }
 
-function getLogStats() {
-  const log = (cache.get("log_bar") as string) || ""
-  const lines = log.split("\n").filter((line) => line.trim())
+await loadConfig()
+
+// Telegram helpers
+async function tg<T = any>(token: string, method: string, body: Record<string, any>): Promise<T> {
+  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  const json = await res.json()
+  if (!json.ok) {
+    console.error("[v0] Telegram API error:", json)
+  }
+  return json
+}
+
+function mainKeyboard() {
+  // Inline keyboard with 5 main buttons
   return {
-    size: log.length,
-    lines: lines.length,
-    sizeKB: Math.round((log.length / 1024) * 100) / 100,
+    inline_keyboard: [
+      [{ text: config.mainButtons[0]?.label || "Button 1", callback_data: "main:0" }],
+      [{ text: config.mainButtons[1]?.label || "Button 2", callback_data: "main:1" }],
+      [{ text: config.mainButtons[2]?.label || "Button 3", callback_data: "main:2" }],
+      [{ text: config.mainButtons[3]?.label || "Button 4", callback_data: "main:3" }],
+      [{ text: config.mainButtons[4]?.label || "Button 5", callback_data: "main:4" }],
+    ],
   }
 }
 
-serve({
-  port: 3000,
-  async fetch(req) {
-    const url = new URL(req.url)
-    const path = url.pathname
-    const method = req.method
-    const pass = url.searchParams.get("pass")
+function subKeyboard(mainIndex: number) {
+  const mb = config.mainButtons[mainIndex]
+  if (!mb || !mb.subButtons?.length) return undefined
+  const rows = mb.subButtons.map((sb, j) => [
+    { text: sb.label || `Sub ${j + 1}`, callback_data: `sub:${mainIndex}:${j}` },
+  ])
+  return { inline_keyboard: rows }
+}
 
-    // Dashboard
-    if (method === "GET" && path === "/") {
-      if (pass !== "admin123") {
-        return new Response(
-          `<!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="UTF-8">
-            <style>
-              body { background: #0f0f0f; color: white; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-              .login-form { background: #1a1a1a; padding: 2rem; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
-              input { padding: 12px; margin: 10px 0; border: none; border-radius: 5px; width: 200px; }
-              button { padding: 12px 24px; background: #f97316; border: none; border-radius: 5px; color: white; font-weight: bold; cursor: pointer; width: 100%; }
-              h2 { color: #f97316; text-align: center; }
-            </style>
-          </head>
-          <body>
-            <div class="login-form">
-              <h2>🔐 Admin Login</h2>
-              <form>
-                <input name='pass' type='password' placeholder='Enter admin password' required>
-                <button type='submit'>Login</button>
-              </form>
-            </div>
-          </body>
-          </html>`,
-          {
-            headers: { "Content-Type": "text/html" },
-          },
-        )
-      }
+async function sendMenu(token: string, chat_id: number, text = "Choose an option:") {
+  return tg(token, "sendMessage", {
+    chat_id,
+    text,
+    reply_markup: mainKeyboard(),
+  })
+}
 
-      // Parse data & clean irrelevant tokens
-      const tokenResponsesRaw = cache.get("token_responses") as string | undefined
-      const tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {}
-      let changed = false
-      for (const token in tokenResponses) {
-        if (!isValidTelegramBotToken(token)) {
-          delete tokenResponses[token]
-          changed = true
-        }
-      }
-      if (changed) cache.set("token_responses", JSON.stringify(tokenResponses))
+async function sendSubMenu(token: string, chat_id: number, mainIndex: number) {
+  const kb = subKeyboard(mainIndex)
+  if (!kb) {
+    return tg(token, "sendMessage", { chat_id, text: "No options available." })
+  }
+  return tg(token, "sendMessage", {
+    chat_id,
+    text: "Choose a sub-option:",
+    reply_markup: kb,
+  })
+}
 
-      // Build dashboard data
-      const stats = {
-        total: cache.get("total_messages") || 0,
-        users: Array.from(new Set((cache.get("users") || []) as string[])),
-        bots: Array.from(new Set((cache.get("bots") || []) as string[])),
-        ads: cache.get("ads") || {},
-        tokenResponses,
-        logBar: (cache.get("log_bar") as string) || "",
-        logStats: getLogStats(), // Added log statistics
-      }
+async function sendPhotoWithDefaults(token: string, chat_id: number, imageUrl?: string, caption?: string) {
+  const photo = imageUrl || config.defaultImageUrl || DEFAULT_IMAGE
+  const cap = caption ?? config.defaultCaption ?? DEFAULT_CAPTION
+  return tg(token, "sendPhoto", { chat_id, photo, caption: cap })
+}
 
-      const sortedTokens = Object.entries(stats.tokenResponses)
-        .sort((a, b) => (b[1] as number) - (a[1] as number))
-        .slice(0, 100)
+// Admin HTML
+function adminHtml(pass: string) {
+  // Simple vanilla JS UI to load/edit/save config
+  return /* html */ `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Menu Admin</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, Noto Sans, Helvetica, Apple Color Emoji, Segoe UI Emoji; margin: 16px; color: #111; }
+    .wrap { max-width: 900px; margin: 0 auto; }
+    h1, h2 { margin: 0 0 12px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    label { display: block; font-size: 14px; margin-bottom: 6px; color: #374151; }
+    input, textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; font-size: 14px; }
+    .row { display: flex; gap: 12px; }
+    .col { flex: 1; }
+    button { background: #111827; color: #fff; border: 0; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+    .btn-secondary { background: #4b5563; }
+    .btn-danger { background: #b91c1c; }
+    .mb-2 { margin-bottom: 8px; }
+    .mb-4 { margin-bottom: 16px; }
+    .mt-2 { margin-top: 8px; }
+    .mt-4 { margin-top: 16px; }
+    small { color: #6b7280; }
+    .grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } .row { flex-direction: column; } }
+    code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Edit Menu</h1>
+    <p class="mb-4">Password provided via <code>?pass=...</code>. Defaults prefilled to send image with caption "send payment and send ss" on any button click.</p>
 
-      const maxCount = Math.max(...sortedTokens.map(([_, count]) => count as number), 1)
-
-      const tokenBar = sortedTokens
-        .map(([token, count]) => {
-          const widthPercent = ((count as number) / maxCount) * 100
-          const shortToken = `${token.substring(0, 10)}...${token.substring(token.length - 10)}`
-          return `
-          <div style="margin:12px 0; padding: 12px; background:#1a1a1a; border-radius: 8px; border: 1px solid #333;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <div style="font-family: monospace; color:#f97316; font-weight: bold;">
-                Token: ${shortToken}
-              </div>
-              <div style="display: flex; gap: 8px;">
-                <button onclick="copyToken('${token}')" style="background:#10b981; padding: 4px 8px; font-size: 12px;">📋 Copy</button>
-                <form method="POST" action="/remove-token?token=${encodeURIComponent(token)}&pass=admin123" style="margin:0;" onsubmit="return confirm('Delete this webhook token?')">
-                  <button type="submit" style="background:#e11d48; padding: 4px 8px; font-size: 12px;">🗑 Delete</button>
-                </form>
-              </div>
-            </div>
-            <div style="background:#333; width:100%; height:20px; border-radius:10px; overflow:hidden; margin: 8px 0;">
-              <div style="background:linear-gradient(90deg, #f97316, #fb923c); width:${widthPercent}%; height:100%; transition: width 0.3s ease;"></div>
-            </div>
-            <div style="color:#ccc; font-size: 14px;">
-              <span>Responses: <b style="color:#f97316;">${count}</b></span>
-              <span style="margin-left: 20px;">Webhook: <code>/webhook/${token}</code></span>
-            </div>
-          </div>
-        `
-        })
-        .join("")
-
-      const form = (type: string, ad: any) => `<!DOCTYPE html>
-        <div style="background:#1a1a1a; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #333;">
-          <h3 style="color:#f97316; margin-top:0;">${type.toUpperCase()} AD</h3>
-          <form method='POST' action='/update-ad?type=${type}&pass=admin123'>
-            <div style="margin: 10px 0;">
-              <label style="display: block; margin-bottom: 5px; color: #ccc;">Image URL:</label>
-              <input name='imageSource' placeholder='https://example.com/image.jpg' value="${ad?.imageSource || ""}" style='width:100%; padding: 10px; border-radius: 5px; border: 1px solid #555; background: #2a2a2a; color: white;'>
-            </div>
-            <div style="margin: 10px 0;">
-              <label style="display: block; margin-bottom: 5px; color: #ccc;">Caption Text:</label>
-              <textarea name='captionText' placeholder='Your ad caption here...' rows=6 style='width:100%; padding: 10px; border-radius: 5px; border: 1px solid #555; background: #2a2a2a; color: white; resize: vertical;'>${ad?.captionText || ""}</textarea>
-            </div>
-            <div style="margin: 10px 0;">
-              <label style="display: block; margin-bottom: 5px; color: #ccc;">Action Links (JSON):</label>
-              <textarea name='actionLinks' placeholder='[{"linkText":"Button Text", "linkDestination":"https://example.com"}]' rows=4 style='width:100%; padding: 10px; border-radius: 5px; border: 1px solid #555; background: #2a2a2a; color: white; font-family: monospace; resize: vertical;'>${JSON.stringify(ad?.actionLinks || [], null, 2)}</textarea>
-            </div>
-            <button type="submit" style="background: #f97316; padding: 12px 24px; border: none; border-radius: 5px; color: white; font-weight: bold; cursor: pointer;">Update ${type} Ad</button>
-          </form>
-        </div>`
-
-      return new Response(
-        `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
-        body { background:#0f0f0f; color:white; font-family:-apple-system,BlinkMacSystemFont,sans-serif; padding:2em; line-height: 1.6; }
-        h1, h2, h3 { color: #f97316; }
-        h1 { border-bottom: 2px solid #f97316; padding-bottom: 10px; }
-        button { padding: 10px 20px; margin: 10px 5px; background: #f97316; border: none; border-radius: 5px; color: white; font-weight: bold; cursor: pointer; transition: all 0.2s; }
-        button:hover { background: #ea580c; transform: translateY(-1px); }
-        button[style*="background:#e11d48"] { background: #e11d48 !important; }
-        button[style*="background:#e11d48"]:hover { background: #be123c !important; }
-        button[style*="background:#10b981"] { background: #10b981 !important; }
-        button[style*="background:#10b981"]:hover { background: #059669 !important; }
-        textarea, input { margin: 5px 0; padding: 10px; border-radius: 5px; border: 1px solid #555; background: #2a2a2a; color: white; }
-        pre { background: #1e1e1e; padding: 1em; border-radius: 8px; max-height: 300px; overflow-y: auto; }
-        .log-bar { background: #1a1a1a; color: #fafafa; font-family: 'Courier New', monospace; border-radius: 8px; margin-top: 2em; padding:1em; max-height:400px; overflow-y:auto; font-size: 0.9em; border: 1px solid #333;}
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0; }
-        .stat-card { background: #1a1a1a; padding: 20px; border-radius: 8px; text-align: center; border: 1px solid #333; }
-        .stat-number { font-size: 2em; font-weight: bold; color: #f97316; }
-        .control-panel { background: #1a1a1a; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #333; }
-        .control-panel h3 { margin-top: 0; }
-        .button-group { display: flex; gap: 10px; flex-wrap: wrap; }
-      </style>
-      <script>
-        function copyToken(token) {
-          navigator.clipboard.writeText(token).then(() => {
-            alert('Token copied to clipboard!');
-          });
-        }
-        
-        function confirmClearCache() {
-          return confirm('Are you sure you want to clear all cache data? This will remove all tokens, users, and statistics.');
-        }
-        
-        function confirmClearLogs() {
-          return confirm('Are you sure you want to clear all logs?');
-        }
-      </script>
-      </head><body>
-        <h1>🤖 Telegram Bot Webhook Dashboard</h1>
-        
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-number">${stats.total}</div>
-            <div>Total Messages</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-number">${stats.users.length}</div>
-            <div>Unique Users</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-number">${stats.bots.length}</div>
-            <div>Active Bots</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-number">${stats.logStats.sizeKB} KB</div>
-            <div>Log Size (${stats.logStats.lines} lines)</div>
-          </div>
+    <div class="card">
+      <h2>Defaults</h2>
+      <div class="grid">
+        <div>
+          <label>Default Image URL</label>
+          <input id="defaultImageUrl" placeholder="https://..." />
+          <small>Used for main clicks and any sub-button without its own image.</small>
         </div>
-
-        <div class="control-panel">
-          <h3>🎛️ Control Panel</h3>
-          <div class="button-group">
-            <form method='POST' action='/clear-cache?pass=admin123' style="margin:0;">
-              <button type='submit' onclick="return confirmClearCache()" style="background:#e11d48;">🗑 Clear All Cache</button>
-            </form>
-            <form method='POST' action='/clear-logs?pass=admin123' style="margin:0;">
-              <button type='submit' onclick="return confirmClearLogs()" style="background:#dc2626;">📜 Clear Logs Only</button>
-            </form>
-            <form method='POST' action='/send-to-channels?pass=admin123' style="margin:0;">
-              <button type='submit'>📢 Send Ads to All Channels</button>
-            </form>
-          </div>
+        <div>
+          <label>Default Caption</label>
+          <input id="defaultCaption" placeholder="Caption" />
+          <small>Used for main clicks and any sub-button without its own caption.</small>
         </div>
+      </div>
+    </div>
 
-        <h2>🔗 Active Webhooks (Top 100 by Activity)</h2>
-        <p style="color:#888; margin-bottom:20px;">
-          Webhooks are automatically managed. Each bot token creates a webhook endpoint at <code>/webhook/{token}</code>
-          <br>Logs auto-trim at 100KB to maintain performance.
-        </p>
-        ${tokenBar || '<p style="color:#888;">No active webhooks found.</p>'}
+    <div id="mains"></div>
 
-        ${form("permanent", stats.ads.permanent)}
-        ${form("temporary", stats.ads.temporary)}
+    <div class="row mt-4">
+      <button id="save">Save</button>
+      <button id="reload" class="btn-secondary">Reload</button>
+    </div>
+  </div>
 
-        <h2>📜 System Logs 
-          <span style="font-size:0.8em;font-weight:normal;color:#888;">
-            (${stats.logStats.sizeKB} KB / 100 KB max, ${stats.logStats.lines} lines)
-          </span>
-        </h2>
-        <div class="log-bar">${stats.logBar.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") || '<em style="color:#666;">No logs yet...</em>'}</div>
-      </body></html>`,
-        { headers: { "Content-Type": "text/html" } },
-      )
+  <template id="main-template">
+    <div class="card">
+      <h2>Main Button</h2>
+      <div class="grid mb-4">
+        <div>
+          <label>Label</label>
+          <input data-field="label" />
+          <small>Shown on the main menu as the button text.</small>
+        </div>
+        <div>
+          <label>Message (optional)</label>
+          <input data-field="message" placeholder="Sent after photo on main click" />
+        </div>
+      </div>
+      <div data-subwrap></div>
+      <button data-add-sub class="mt-2">+ Add Sub-button</button>
+    </div>
+  </template>
+
+  <template id="sub-template">
+    <div class="card">
+      <h3>Sub-button</h3>
+      <div class="grid">
+        <div>
+          <label>Label</label>
+          <input data-field="label" />
+        </div>
+        <div>
+          <label>Image URL (optional)</label>
+          <input data-field="imageUrl" placeholder="https://..." />
+        </div>
+      </div>
+      <div class="mt-2">
+        <label>Caption (optional)</label>
+        <input data-field="caption" placeholder="Overrides default caption" />
+      </div>
+      <div class="mt-2">
+        <button data-remove-sub class="btn-danger">Remove</button>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    const pass = ${JSON.stringify(pass)}
+    let state = null
+
+    function qs(sel, el = document) { return el.querySelector(sel) }
+    function qsa(sel, el = document) { return Array.from(el.querySelectorAll(sel)) }
+
+    async function load() {
+      const res = await fetch('/api/config?pass=' + encodeURIComponent(pass))
+      if (!res.ok) {
+        alert('Failed to load config. Check ?pass=...')
+        return
+      }
+      state = await res.json()
+      render()
     }
 
-    if (method === "POST" && path === "/remove-token" && pass === "admin123") {
-      const token = url.searchParams.get("token")
-      if (!token) {
-        return new Response(`<script>alert('❌ No token specified');location.href='/?pass=admin123'</script>`, {
-          headers: { "Content-Type": "text/html" },
-        })
-      }
+    function render() {
+      qs('#defaultImageUrl').value = state.defaultImageUrl || ''
+      qs('#defaultCaption').value = state.defaultCaption || ''
 
-      if (!isValidTelegramBotToken(token)) {
-        return new Response(`<script>alert('❌ Invalid token format');location.href='/?pass=admin123'</script>`, {
-          headers: { "Content-Type": "text/html" },
-        })
-      }
-
-      try {
-        // Remove from token_responses
-        const tokenResponsesRaw = cache.get("token_responses") as string | undefined
-        const tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {}
-        const wasPresent = token in tokenResponses
-        delete tokenResponses[token]
-        cache.set("token_responses", JSON.stringify(tokenResponses))
-
-        // Remove from bots list
-        const bots = (cache.get("bots") || []) as string[]
-        const filteredBots = bots.filter((t: string) => t !== token)
-        cache.set("bots", filteredBots)
-
-        if (wasPresent) {
-          appendLog(`✅ Removed webhook token: ${token.substring(0, 10)}...${token.substring(token.length - 10)}`)
-          return new Response(
-            `<script>alert('✅ Webhook deleted successfully');location.href='/?pass=admin123'</script>`,
-            { headers: { "Content-Type": "text/html" } },
-          )
-        } else {
-          appendLog(
-            `⚠️ Attempted to remove non-existent token: ${token.substring(0, 10)}...${token.substring(token.length - 10)}`,
-          )
-          return new Response(`<script>alert('⚠️ Token was not found');location.href='/?pass=admin123'</script>`, {
-            headers: { "Content-Type": "text/html" },
+      const wrap = qs('#mains')
+      wrap.innerHTML = ''
+      for (let i = 0; i < 5; i++) {
+        const main = state.mainButtons[i] || { label: 'Button ' + (i+1), message: '', subButtons: [] }
+        const t = document.importNode(qs('#main-template').content, true)
+        const root = t.firstElementChild
+        const inputs = qsa('[data-field]', root)
+        for (const inp of inputs) {
+          const field = inp.getAttribute('data-field')
+          inp.value = main[field] || ''
+          inp.addEventListener('input', () => {
+            main[field] = inp.value
           })
         }
-      } catch (error) {
-        appendLog(`❌ Error removing token: ${error}`)
-        return new Response(`<script>alert('❌ Error removing token');location.href='/?pass=admin123'</script>`, {
-          headers: { "Content-Type": "text/html" },
+
+        const subwrap = qs('[data-subwrap]', root)
+        function addSub(sub) {
+          const st = document.importNode(qs('#sub-template').content, true)
+          const sroot = st.firstElementChild
+          const sinputs = qsa('[data-field]', sroot)
+          for (const inp of sinputs) {
+            const field = inp.getAttribute('data-field')
+            inp.value = sub[field] || ''
+            inp.addEventListener('input', () => {
+              sub[field] = inp.value
+            })
+          }
+          qs('[data-remove-sub]', sroot).addEventListener('click', () => {
+            const idx = main.subButtons.indexOf(sub)
+            if (idx >= 0) main.subButtons.splice(idx, 1)
+            sroot.remove()
+          })
+          subwrap.appendChild(sroot)
+        }
+
+        qs('[data-add-sub]', root).addEventListener('click', () => {
+          const sub = { label: 'New Sub', imageUrl: '', caption: '' }
+          main.subButtons = main.subButtons || []
+          main.subButtons.push(sub)
+          addSub(sub)
         })
+
+        main.subButtons = main.subButtons || []
+        for (const sb of main.subButtons) addSub(sb)
+
+        // Ensure state array slot exists
+        state.mainButtons[i] = main
+        wrap.appendChild(root)
       }
     }
 
-    if (method === "POST" && path === "/clear-logs" && pass === "admin123") {
-      clearLogs()
-      return new Response(`<script>alert('📜 Logs cleared successfully');location.href='/?pass=admin123'</script>`, {
-        headers: { "Content-Type": "text/html" },
+    async function save() {
+      // Collect top-level fields
+      state.defaultImageUrl = qs('#defaultImageUrl').value.trim()
+      state.defaultCaption = qs('#defaultCaption').value.trim()
+      const res = await fetch('/api/config?pass=' + encodeURIComponent(pass), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state)
       })
-    }
-
-    if (method === "POST" && path === "/send-to-channels" && pass === "admin123") {
-      const bots = Array.from(new Set((cache.get("bots") || []) as string[]))
-      const chatLinks = cache.get("chat_links") || {}
-      const ads = cache.get("ads") || {}
-      const ad = ads.temporary || ads.permanent
-
-      if (!ad || !ad.imageSource || !ad.captionText) {
-        appendLog(`❌ Cannot send ads: Missing ad configuration`)
-        return new Response(`<script>alert('❌ No ad configured');location.href='/?pass=admin123'</script>`, {
-          headers: { "Content-Type": "text/html" },
-        })
-      }
-
-      let sentCount = 0
-      let errorCount = 0
-
-      for (const bot of bots) {
-        for (const chatId of Object.keys(chatLinks)) {
-          try {
-            const response = await fetch(`https://api.telegram.org/bot${bot}/sendPhoto`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                chat_id: chatId,
-                photo: ad.imageSource,
-                caption: ad.captionText,
-                parse_mode: "HTML",
-                reply_markup: {
-                  inline_keyboard: ad.actionLinks.map((l: any) => [{ text: l.linkText, url: l.linkDestination }]),
-                },
-              }),
-            })
-
-            if (response.ok) {
-              sentCount++
-            } else {
-              errorCount++
-            }
-          } catch (error) {
-            errorCount++
-          }
-        }
-      }
-
-      appendLog(`📢 Sent ads to ${sentCount} chats, ${errorCount} errors`)
-      return new Response(
-        `<script>alert('📢 Sent to ${sentCount} chats (${errorCount} errors)');location.href='/?pass=admin123'</script>`,
-        { headers: { "Content-Type": "text/html" } },
-      )
-    }
-
-    if (method === "POST" && path === "/update-ad" && pass === "admin123") {
-      const formData = await req.formData()
-      const type = url.searchParams.get("type")
-
-      if (!type || !["permanent", "temporary"].includes(type)) {
-        return new Response(`<script>alert('❌ Invalid ad type');location.href='/?pass=admin123'</script>`, {
-          headers: { "Content-Type": "text/html" },
-        })
-      }
-
-      const imageSource = formData.get("imageSource")?.toString()?.trim()
-      const captionText = formData.get("captionText")?.toString()?.trim()
-      const actionLinksRaw = formData.get("actionLinks")?.toString()?.trim()
-
-      if (!imageSource || !captionText) {
-        return new Response(
-          `<script>alert('❌ Image URL and caption are required');location.href='/?pass=admin123'</script>`,
-          { headers: { "Content-Type": "text/html" } },
-        )
-      }
-
-      try {
-        const actionLinks = actionLinksRaw ? JSON.parse(actionLinksRaw) : []
-
-        // Validate action links structure
-        if (!Array.isArray(actionLinks)) {
-          throw new Error("Action links must be an array")
-        }
-
-        for (const link of actionLinks) {
-          if (!link.linkText || !link.linkDestination) {
-            throw new Error("Each action link must have linkText and linkDestination")
-          }
-        }
-
-        const ads = cache.get("ads") || {}
-        ads[type] = {
-          imageSource,
-          captionText,
-          actionLinks,
-        }
-        cache.set("ads", ads)
-
-        appendLog(`✅ Updated "${type}" ad configuration`)
-        return new Response(
-          `<script>alert('✅ ${type.toUpperCase()} ad updated successfully');location.href='/?pass=admin123'</script>`,
-          { headers: { "Content-Type": "text/html" } },
-        )
-      } catch (error) {
-        appendLog(`❌ Error updating ${type} ad: ${error}`)
-        return new Response(
-          `<script>alert('❌ Invalid JSON format in action links');location.href='/?pass=admin123'</script>`,
-          { headers: { "Content-Type": "text/html" } },
-        )
+      if (!res.ok) {
+        const t = await res.text()
+        alert('Failed to save: ' + t)
+      } else {
+        alert('Saved!')
       }
     }
 
-    if (method === "POST" && path.startsWith("/webhook/")) {
-      const botToken = path.replace("/webhook/", "")
-      if (!isValidTelegramBotToken(botToken)) {
-        appendLog(`❌ Invalid webhook token format: ${botToken.substring(0, 20)}...`)
-        return new Response("Ignored: Invalid token format", { status: 400 })
+    qs('#save').addEventListener('click', save)
+    qs('#reload').addEventListener('click', load)
+    load()
+  </script>
+</body>
+</html>`
+}
+
+// Minimal router
+async function handleRequest(req: Request): Promise<Response> {
+  const url = new URL(req.url)
+  const { pathname, searchParams } = url
+
+  // Admin UI
+  if (pathname === "/admin") {
+    const pass = searchParams.get("pass") || ""
+    if (pass !== ADMIN_PASS) return new Response("Forbidden", { status: 403 })
+    return new Response(adminHtml(pass), { headers: { "Content-Type": "text/html; charset=utf-8" } })
+  }
+
+  // Config API
+  if (pathname === "/api/config") {
+    const pass = searchParams.get("pass") || ""
+    if (pass !== ADMIN_PASS) return new Response("Forbidden", { status: 403 })
+    if (req.method === "GET") {
+      return Response.json(config)
+    }
+    if (req.method === "POST") {
+      const incoming = await req.json().catch(() => null)
+      if (!incoming || !Array.isArray(incoming.mainButtons)) {
+        return new Response("Invalid payload", { status: 400 })
       }
+      config = incoming
+      await saveConfig()
+      return new Response("ok")
+    }
+    return new Response("Method Not Allowed", { status: 405 })
+  }
 
-      try {
-        const update: TelegramUpdate = await req.json()
-
-        // Track bot
-        const bots = cache.get("bots") || []
-        cache.set("bots", Array.from(new Set([...(bots as string[]), botToken])))
-
-        // Update token response count
-        const tokenResponsesRaw = cache.get("token_responses") as string | undefined
-        const tokenResponses = tokenResponsesRaw ? JSON.parse(tokenResponsesRaw) : {}
-        tokenResponses[botToken] = (tokenResponses[botToken] || 0) + 1
-        cache.set("token_responses", JSON.stringify(tokenResponses))
-
-        // Update total message count
-        const total = (cache.get("total_messages") as number) || 0
-        cache.set("total_messages", total + 1)
-
-        const shortToken = `${botToken.substring(0, 10)}...${botToken.substring(botToken.length - 10)}`
-        appendLog(`📨 Webhook ${shortToken} | Count: ${tokenResponses[botToken]}`)
-
-        const cb = update.callback_query
-        if (cb && cb.message?.chat?.id) {
-          const chatId = cb.message.chat.id
-          try {
-            // Courtesy: answer the callback to dismiss the loading UI
-            await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                callback_query_id: cb.id,
-                text: "Processing...",
-                show_alert: false,
-              }),
-            })
-          } catch (e) {
-            // no-op, we still try sending the photo
-          }
-
-          try {
-            const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                chat_id: chatId,
-                photo: "https://i.ibb.co/pvpn8kDc/x.jpg",
-                caption: "send payment and send ss",
-              }),
-            })
-            if (resp.ok) {
-              appendLog(`🖼️ Sent payment image on button click to chat ${chatId} via ${shortToken}`)
-            } else {
-              const t = await resp.text()
-              appendLog(`❌ Failed to send payment image on button click: ${t}`)
-            }
-          } catch (err) {
-            appendLog(`❌ Error sending payment image on button click: ${err}`)
-          }
-
-          return new Response("OK")
-        }
-
-        const activity =
-          update.message ||
-          update.edited_message ||
-          update.channel_post ||
-          update.edited_channel_post ||
-          update.my_chat_member ||
-          update.chat_member ||
-          update.chat_join_request
-        if (!activity) {
-          appendLog(`⚠️ No activity found in webhook ${shortToken}`)
-          return new Response("Ignored: No activity")
-        }
-
-        const chatId = activity.chat?.id || activity.chat?.chat?.id || activity.from?.id
-        const userId = activity.from?.id?.toString()
-
-        // Track user
-        if (userId) {
-          const users = cache.get("users") || []
-          cache.set("users", Array.from(new Set([...(users as string[]), userId])))
-        }
-
-        // Get or fetch chat link
-        const chatLinks = cache.get("chat_links") || {}
-        if (chatId && !chatLinks[chatId]) {
-          try {
-            const chatResponse = await fetch(`https://api.telegram.org/bot${botToken}/getChat`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ chat_id: chatId }),
-            })
-
-            if (chatResponse.ok) {
-              const result = await chatResponse.json()
-              if (result.ok) {
-                const info = result.result
-                const link = info.username
-                  ? `https://t.me/${info.username}`
-                  : info.invite_link || `https://t.me/c/${String(chatId).replace("-100", "")}`
-                chatLinks[chatId] = link
-                cache.set("chat_links", chatLinks)
-                appendLog(`🔗 Cached chat link for ${chatId}`)
-              }
-            }
-          } catch (error) {
-            appendLog(`❌ Error fetching chat info: ${error}`)
-          }
-        }
-
-        // Send ad response
-        const ads = cache.get("ads") || {}
-        const ad = ads.temporary || ads.permanent
-
-        if (ad && ad.imageSource && ad.captionText && chatId) {
-          try {
-            const adResponse = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                chat_id: chatId,
-                photo: ad.imageSource,
-                caption: ad.captionText,
-                parse_mode: "HTML",
-                reply_markup: {
-                  inline_keyboard: ad.actionLinks.map((l: any) => [{ text: l.linkText, url: l.linkDestination }]),
-                },
-              }),
-            })
-
-            if (adResponse.ok) {
-              appendLog(`📤 Sent ad to chat ${chatId} via ${shortToken}`)
-            } else {
-              const errorText = await adResponse.text()
-              appendLog(`❌ Failed to send ad: ${errorText}`)
-            }
-          } catch (error) {
-            appendLog(`❌ Error sending ad: ${error}`)
-          }
-        }
-
-        return new Response("OK")
-      } catch (error) {
-        appendLog(`❌ Webhook processing error: ${error}`)
-        return new Response("Error processing webhook", { status: 500 })
-      }
+  // Telegram webhook: POST /webhook/:token
+  if (pathname.startsWith("/webhook/")) {
+    if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 })
+    const token = decodeURIComponent(pathname.split("/").pop() || "")
+    if (!token || !BOT_TOKEN || token !== BOT_TOKEN) {
+      return new Response("Forbidden", { status: 403 })
+    }
+    let update: any = null
+    try {
+      update = await req.json()
+    } catch (e) {
+      return new Response("Bad Request", { status: 400 })
     }
 
-    if (method === "POST" && path === "/clear-cache" && pass === "admin123") {
-      try {
-        cache.flushAll()
-        // Reinitialize ads after clearing cache
-        cache.set("ads", {
-          permanent: {
-            imageSource: "https://i.ibb.co/J66PqCQ/x.jpg",
-            captionText: `🔥 <b>NEW MMS LEAKS ARE OUT!</b> 🔥\n\n💥 <b><u>EXCLUSIVE PREMIUM CONTENT</u></b> 💥\n\n🎬 <i>Fresh leaked content daily</i>\n🔞 <b>18+ Adult Material</b>\n💎 <i>Premium quality videos & files</i>\n🚀 <b>Instant access available</b>\n\n⬇️ <b><u>Click any server below</u></b> ⬇️`,
-            actionLinks: [
-              { linkText: "🎥 VIDEOS💦", linkDestination: "https://t.me/+Go8FEdh9M8Y3ZWU1" },
-              { linkText: "📁 FILES🍑", linkDestination: "https://t.me/+06bZb-fbn4kzNjll" },
-            ],
-          },
-          temporary: null,
-        })
-        appendLog(`🗑️ All cache data cleared and reset`)
-        return new Response(`<script>alert('🗑️ All cache cleared and reset');location.href='/?pass=admin123'</script>`, {
-          headers: { "Content-Type": "text/html" },
-        })
-      } catch (error) {
-        appendLog(`❌ Error clearing cache: ${error}`)
-        return new Response(`<script>alert('❌ Error clearing cache');location.href='/?pass=admin123'</script>`, {
-          headers: { "Content-Type": "text/html" },
-        })
+    // Handle message (/start -> show menu)
+    if (update.message) {
+      const msg = update.message
+      const chatId = msg.chat?.id
+      const text = (msg.text || "").trim().toLowerCase()
+      if (!chatId) return new Response("ok")
+
+      if (text === "/start" || text === "menu" || text === "/menu") {
+        await sendMenu(token, chatId, "Choose a main option:")
+        return new Response("ok")
       }
+
+      // Optional: any other text can re-show the menu
+      // await sendMenu(token, chatId, "Choose a main option:")
+      return new Response("ok")
     }
 
-    return new Response("Not Found", { status: 404 })
-  },
+    // Handle callback query (inline keyboard button clicks)
+    if (update.callback_query) {
+      const cq = update.callback_query
+      const chatId = cq.message?.chat?.id
+      const data = cq.data || ""
+      const cqId = cq.id
+      if (cqId) {
+        // Acknowledge quickly to stop loader
+        await tg(token, "answerCallbackQuery", { callback_query_id: cqId })
+      }
+      if (!chatId) return new Response("ok")
+
+      // Any button click must send the image+caption (defaults or overrides)
+      // main:i -> send default photo+caption, then show sub-menu (and optional main message)
+      // sub:i:j -> send sub override photo+caption (or defaults)
+      if (data.startsWith("main:")) {
+        const idx = Number.parseInt(data.split(":")[1] || "0", 10) || 0
+        const mainBtn = config.mainButtons[idx]
+        await sendPhotoWithDefaults(token, chatId) // global default on main click
+        if (mainBtn?.message) {
+          await tg(token, "sendMessage", { chat_id: chatId, text: mainBtn.message })
+        }
+        await sendSubMenu(token, chatId, idx)
+        return new Response("ok")
+      }
+
+      if (data.startsWith("sub:")) {
+        const [, iStr, jStr] = data.split(":")
+        const i = Number.parseInt(iStr || "0", 10) || 0
+        const j = Number.parseInt(jStr || "0", 10) || 0
+        const mainBtn = config.mainButtons[i]
+        const subBtn = mainBtn?.subButtons?.[j]
+        const img = subBtn?.imageUrl || undefined
+        const cap = subBtn?.caption ?? undefined
+        await sendPhotoWithDefaults(token, chatId, img, cap)
+        return new Response("ok")
+      }
+
+      // Unknown callback, still follow rule: send default image
+      await sendPhotoWithDefaults(token, chatId)
+      return new Response("ok")
+    }
+
+    return new Response("ok")
+  }
+
+  // Root: quick pointer
+  if (pathname === "/") {
+    const tip = `
+      <h1>Telegram Bot + Admin (Bun)</h1>
+      <p>Use <code>/admin?pass=${ADMIN_PASS}</code> to edit the menu.</p>
+      <p>Set Telegram webhook to <code>/webhook/${BOT_TOKEN || "{BOT_TOKEN}"}</code>.</p>
+      <p>On any button click (main or sub), the bot sends the configured image with caption.</p>
+    `
+    return new Response(
+      `<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;padding:16px">${tip}</body>`,
+      {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      },
+    )
+  }
+
+  return new Response("Not Found", { status: 404 })
+}
+
+Bun.serve({
+  port: Bun.env.PORT ? Number(Bun.env.PORT) : 3000,
+  fetch: handleRequest,
 })
 
-console.log("✅ Enhanced Telegram bot webhook dashboard is live on http://localhost:3000")
-console.log("🔐 Admin password: admin123")
-console.log("📊 Features: Auto-log trimming at 100KB, Enhanced webhook management, Better error handling")
+console.log("[v0] Bun server running on http://localhost:3000")
+console.log("[v0] Admin:", `http://localhost:3000/admin?pass=${ADMIN_PASS}`)
+console.log("[v0] Webhook:", `http://localhost:3000/webhook/${BOT_TOKEN || "{BOT_TOKEN}"}`)
