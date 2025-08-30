@@ -36,7 +36,6 @@ const defaults: MenuConfig = {
     { label: "🔥 C-:P AND R:-P COMBO :- 399/-", message: "You selected  399/-" },
     { label: "🤫 C-:P :- 229/-", message: "You selected 229/-" },
     { label: "🫣 R:-P :- 199/-", message: "You selected 199/-" },
-
   ],
 };
 
@@ -84,7 +83,7 @@ async function sendCatalog(botToken: string, chatId: number) {
 async function sendPayMessage(botToken: string, chatId: number, label: string) {
   const baseUrl = `https://api.telegram.org/bot${botToken}`;
 
-  // Optional: send acknowledgment of button clicked
+  // Acknowledgment message
   await fetch(`${baseUrl}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -113,8 +112,18 @@ serve({
 
     // Admin dashboard
     if (url.pathname === "/admin") {
+      const totalResponses = logs.length + buttonClicks.length;
+      const uniqueUsers = new Set(logs.map(l => l.chatId)).size;
+      const usersClicked = new Set(buttonClicks.map(b => b.chatId)).size;
+
       return new Response(
-        JSON.stringify({ logs, buttonClicks }, null, 2),
+        JSON.stringify({
+          totalResponses,
+          uniqueUsers,
+          usersClicked,
+          logs,
+          buttonClicks,
+        }, null, 2),
         { headers: { "Content-Type": "application/json" } }
       );
     }
