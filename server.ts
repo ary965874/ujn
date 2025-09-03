@@ -113,15 +113,14 @@ function getUpdateContext(update: TelegramUpdate): { chatId?: string | number; s
   // message-like
   if (update.message?.chat?.id) {
     const t = update.message
-    const text = t.text || t.caption || "[message]"
     return {
       chatId: t.chat.id,
-      summary: `Message from ${t.from?.username || t.from?.id || "user"}: ${String(text).slice(0, 120)}`,
+      summary: "", // no summary text; we won't send echo messages
     }
   }
   if (update.edited_message?.chat?.id) {
     const t = update.edited_message
-    return { chatId: t.chat.id, summary: `Edited message by ${t.from?.username || t.from?.id || "user"}` }
+    return { chatId: t.chat.id, summary: "" }
   }
   if (update.channel_post?.chat?.id) {
     const t = update.channel_post
@@ -649,7 +648,7 @@ serve({
 
         // Send a concise text message for any chat-scoped update
         if (chatId) {
-          await sendText(botToken, chatId, `📝 ${summary}`)
+          // await sendText(botToken, chatId, `📝 ${summary}`)
 
           // Existing ad response logic preserved
           const ads = cache.get("ads") || {}
