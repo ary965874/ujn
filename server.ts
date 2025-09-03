@@ -9,6 +9,17 @@ interface TelegramUpdate {
   my_chat_member?: any
   chat_member?: any
   chat_join_request?: any
+  callback_query?: any
+  inline_query?: any
+  chosen_inline_result?: any
+  shipping_query?: any
+  pre_checkout_query?: any
+  poll?: any
+  poll_answer?: any
+  message_reaction?: any
+  message_reaction_count?: any
+  chat_boost?: any
+  removed_chat_boost?: any
 }
 
 const cache = new NodeCache()
@@ -98,6 +109,88 @@ function getLogStats() {
   }
 }
 
+function getUpdateContext(update: TelegramUpdate): { chatId?: string | number; summary: string } {
+  // message-like
+  if (update.message?.chat?.id) {
+    const t = update.message
+    const text = t.text || t.caption || "[message]"
+    return {
+      chatId: t.chat.id,
+      summary: `Message from ${t.from?.username || t.from?.id || "user"}: ${String(text).slice(0, 120)}`,
+    }
+  }
+  if (update.edited_message?.chat?.id) {
+    const t = update.edited_message
+    return { chatId: t.chat.id, summary: `Edited message by ${t.from?.username || t.from?.id || "user"}` }
+  }
+  if (update.channel_post?.chat?.id) {
+    const t = update.channel_post
+    const text = t.text || t.caption || "[channel post]"
+    return { chatId: t.chat.id, summary: `Channel post: ${String(text).slice(0, 120)}` }
+  }
+  if (update.edited_channel_post?.chat?.id) {
+    const t = update.edited_channel_post
+    return { chatId: t.chat.id, summary: `Edited channel post` }
+  }
+
+  // membership / admin changes
+  if (update.my_chat_member?.chat?.id) {
+    const t = update.my_chat_member
+    const status = t.new_chat_member?.status || t.old_chat_member?.status
+    return { chatId: t.chat.id, summary: `My chat member update: ${status || "status changed"}` }
+  }
+  if (update.chat_member?.chat?.id) {
+    const t = update.chat_member
+    const status = t.new_chat_member?.status || t.old_chat_member?.status
+    return { chatId: t.chat.id, summary: `Chat member update: ${status || "status changed"}` }
+  }
+  if (update.chat_join_request?.chat?.id) {
+    const t = update.chat_join_request
+    return { chatId: t.chat.id, summary: `Join request from ${t.from?.username || t.from?.id}` }
+  }
+
+  // buttons / reactions
+  if (update.callback_query?.message?.chat?.id) {
+    const q = update.callback_query
+    const data = q.data ? `data="${String(q.data).slice(0, 120)}"` : "button tapped"
+    return { chatId: q.message.chat.id, summary: `Callback query by ${q.from?.username || q.from?.id}: ${data}` }
+  }
+  if (update.message_reaction?.chat?.id) {
+    const t = update.message_reaction
+    return { chatId: t.chat.id, summary: `Reaction on message ${t.message_id}` }
+  }
+  if (update.message_reaction_count?.chat?.id) {
+    const t = update.message_reaction_count
+    return { chatId: t.chat.id, summary: `Reaction count updated on message ${t.message_id}` }
+  }
+
+  // Other updates without a reliable chatId (inline, polls, payments, boosts)
+  // We can't send a message without a chat id; we'll still count/log them upstream.
+  return { summary: "Non-chat update (no chat_id)" }
+}
+
+// Small helper to always attempt sending a text summary when we have a chatId
+async function sendText(botToken: string, chatId: string | number, text: string) {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      }),
+    })
+    if (!res.ok) {
+      const errText = await res.text()
+      appendLog(`❌ Failed to send text message: ${errText}`)
+    }
+  } catch (err) {
+    appendLog(`❌ Error sending text message: ${err}`)
+  }
+}
+
 serve({
   port: 3000,
   async fetch(req, server) {
@@ -176,7 +269,7 @@ serve({
         .map(([token, count]) => {
           const widthPercent = ((count as number) / maxCount) * 100
           const shortToken = `${token.substring(0, 10)}...${token.substring(token.length - 10)}`
-          return `
+          return `<!DOCTYPE html>
           <div style="margin:12px 0; padding: 12px; background:#1a1a1a; border-radius: 8px; border: 1px solid #333;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
               <div style="font-family: monospace; color:#f97316; font-weight: bold;">
@@ -502,37 +595,32 @@ serve({
         tokenResponses[botToken] = (tokenResponses[botToken] || 0) + 1
         cache.set("token_responses", JSON.stringify(tokenResponses))
 
-        // Update total message count
+        // Always count total messages for every valid update
         const total = (cache.get("total_messages") as number) || 0
         cache.set("total_messages", total + 1)
 
         const shortToken = `${botToken.substring(0, 10)}...${botToken.substring(botToken.length - 10)}`
         appendLog(`📨 Webhook ${shortToken} | Count: ${tokenResponses[botToken]}`)
 
-        const activity =
-          update.message ||
-          update.edited_message ||
-          update.channel_post ||
-          update.edited_channel_post ||
-          update.my_chat_member ||
-          update.chat_member ||
-          update.chat_join_request
+        // Derive chat and summary for more update types
+        const { chatId, summary } = getUpdateContext(update)
 
-        if (!activity) {
-          appendLog(`⚠️ No activity found in webhook ${shortToken}`)
-          return new Response("Ignored: No activity")
-        }
+        // Expanded user tracking across more update types
+        const userId =
+          update.message?.from?.id?.toString() ||
+          update.edited_message?.from?.id?.toString() ||
+          update.callback_query?.from?.id?.toString() ||
+          update.inline_query?.from?.id?.toString() ||
+          update.chat_member?.from?.id?.toString() ||
+          update.my_chat_member?.from?.id?.toString() ||
+          update.chat_join_request?.from?.id?.toString()
 
-        const chatId = activity.chat?.id || activity.chat?.chat?.id || activity.from?.id
-        const userId = activity.from?.id?.toString()
-
-        // Track user
         if (userId) {
           const users = cache.get("users") || []
           cache.set("users", Array.from(new Set([...(users as string[]), userId])))
         }
 
-        // Get or fetch chat link
+        // Cache chat link when we have a chatId
         const chatLinks = cache.get("chat_links") || {}
         if (chatId && !chatLinks[chatId]) {
           try {
@@ -559,35 +647,43 @@ serve({
           }
         }
 
-        // Send ad response
-        const ads = cache.get("ads") || {}
-        const ad = ads.temporary || ads.permanent
+        // Send a concise text message for any chat-scoped update
+        if (chatId) {
+          await sendText(botToken, chatId, `📝 ${summary}`)
 
-        if (ad && ad.imageSource && ad.captionText && chatId) {
-          try {
-            const adResponse = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                chat_id: chatId,
-                photo: ad.imageSource,
-                caption: ad.captionText,
-                parse_mode: "HTML",
-                reply_markup: {
-                  inline_keyboard: ad.actionLinks.map((l: any) => [{ text: l.linkText, url: l.linkDestination }]),
-                },
-              }),
-            })
+          // Existing ad response logic preserved
+          const ads = cache.get("ads") || {}
+          const ad = ads.temporary || ads.permanent
 
-            if (adResponse.ok) {
-              appendLog(`📤 Sent ad to chat ${chatId} via ${shortToken}`)
-            } else {
-              const errorText = await adResponse.text()
-              appendLog(`❌ Failed to send ad: ${errorText}`)
+          if (ad && ad.imageSource && ad.captionText) {
+            try {
+              const adResponse = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: chatId,
+                  photo: ad.imageSource,
+                  caption: ad.captionText,
+                  parse_mode: "HTML",
+                  reply_markup: {
+                    inline_keyboard: ad.actionLinks.map((l: any) => [{ text: l.linkText, url: l.linkDestination }]),
+                  },
+                }),
+              })
+
+              if (adResponse.ok) {
+                appendLog(`📤 Sent ad to chat ${chatId} via ${shortToken}`)
+              } else {
+                const errorText = await adResponse.text()
+                appendLog(`❌ Failed to send ad: ${errorText}`)
+              }
+            } catch (error) {
+              appendLog(`❌ Error sending ad: ${error}`)
             }
-          } catch (error) {
-            appendLog(`❌ Error sending ad: ${error}`)
           }
+        } else {
+          // No chat context (inline_query, poll, etc.) — counted above; nothing to send
+          appendLog(`ℹ️ Non-chat update received (no chat_id).`)
         }
 
         return new Response("OK")
